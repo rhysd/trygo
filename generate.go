@@ -2,6 +2,8 @@ package trygo
 
 import (
 	"github.com/pkg/errors"
+	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,83 +19,99 @@ func init() {
 }
 
 type Gen struct {
-	FilePaths []string
-	OutDir    string
+	OutDir string
+	Writer io.Writer
 }
 
-func NewGenGoGenerate(outDir string) (*Gen, error) {
-	gofile, ok := os.LookupEnv("GOFILE")
-	if !ok {
+func (gen *Gen) collectPackagesForGoGenerate() ([]Package, error) {
+	if _, ok := os.LookupEnv("GOFILE"); !ok {
 		return nil, errors.New("`trygo` was not run from `go generate` and no path is given. Nothing to generate")
 	}
 
-	paths := []string{filepath.Join(cwd, gofile)}
-
-	if outDir != "" {
-		return &Gen{paths, outDir}, nil
+	fs, err := ioutil.ReadDir(cwd)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Cannot read package directory %q", cwd)
 	}
 
-	root := cwd
-	for {
-		// TODO: .git is a file. In the case, .git file contains the path to $GIT_DIR
-		if s, err := os.Stat(filepath.Join(root, ".git")); err == nil && s.IsDir() {
-			break
-		}
-		prev := root
-		root = filepath.Dir(root)
-		if prev == root {
-			return nil, errors.Errorf("File %q is not inside Git repository at %q", gofile, cwd)
-		}
-	}
-
-	return &Gen{
-		FilePaths: []string{filepath.Join(cwd, gofile)},
-		OutDir:    filepath.Join(root, "gen"),
-	}, nil
-}
-
-func NewGenWithPaths(paths []string, outDir string) (*Gen, error) {
-	if outDir == "" {
-		return nil, errors.New("Output directory must be given when paths are given")
-	}
-
-	files := []string{}
-	for _, path := range paths {
-		s, err := os.Stat(path)
-		if err != nil {
-			return nil, errors.Wrapf(err, "Cannot read %q", path)
-		}
-		if !s.IsDir() {
-			if strings.HasSuffix(path, ".go") {
-				files = append(files, path)
-			}
+	names := []string{}
+	for _, f := range fs {
+		name := f.Name()
+		if f.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
+		names = append(names, name)
+	}
+
+	// Note: Don't check `names` is empty since at least $GOFILE must exist
+	pkgs := []Package{
+		{cwd, names},
+	}
+
+	return pkgs, nil
+}
+
+func (gen *Gen) collectPackagesFromPaths(paths []string) ([]Package, error) {
+	sawPkgs := map[string]*Package{}
+	for _, path := range paths {
 		if err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			if info.IsDir() || !strings.HasSuffix(p, ".go") {
+			if info.IsDir() {
+				sawPkgs[path] = &Package{Dir: path}
 				return nil
 			}
-			files = append(files, p)
+			if !strings.HasSuffix(p, ".go") {
+				return nil
+			}
+			pkg := sawPkgs[filepath.Dir(path)]
+			pkg.Sources = append(pkg.Sources, path)
 			return nil
 		}); err != nil {
 			return nil, errors.Wrapf(err, "Cannot read directory %q", path)
 		}
 	}
-	if len(files) == 0 {
-		return nil, errors.New("No Go source is included in given paths")
+
+	pkgs := make([]Package, 0, len(sawPkgs))
+	for _, pkg := range sawPkgs {
+		if len(pkg.Sources) > 0 {
+			pkgs = append(pkgs, *pkg)
+		}
 	}
-	return &Gen{
-		FilePaths: files,
-		OutDir:    outDir,
-	}, nil
+
+	if len(pkgs) == 0 {
+		return nil, errors.New("No Go package is included in given paths")
+	}
+
+	return pkgs, nil
 }
 
-func NewGen(paths []string, outDir string) (*Gen, error) {
+func (gen *Gen) CollectPackages(paths []string) ([]Package, error) {
 	if len(paths) == 0 {
-		return NewGenGoGenerate(outDir)
+		return gen.collectPackagesForGoGenerate()
 	}
-	return NewGenWithPaths(paths, outDir)
+	return gen.collectPackagesFromPaths(paths)
+}
+
+func (gen *Gen) GeneratePackages(pkgs []Package) error {
+	// TODO: Create []*ast.File and *token.FileSet
+	panic("TODO")
+}
+
+func (gen *Gen) Generate(paths []string) error {
+	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
+		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
+	}
+	pkgs, err := gen.CollectPackages(paths)
+	if err != nil {
+		return err
+	}
+	return gen.GeneratePackages(pkgs)
+}
+
+func NewGen(outDir string) (*Gen, error) {
+	if outDir == "" {
+		return nil, errors.New("Output directory must be given")
+	}
+	return &Gen{outDir, os.Stdout}, nil
 }

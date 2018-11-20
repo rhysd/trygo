@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const usageHeader = `Usage: trygo [flags] {paths...}
+const usageHeader = `Usage: trygo [flags] {dirs...}
 
   trygo is a translator from TryGo sources into Go sources. Directory
 
@@ -33,12 +33,13 @@ func usage() {
 func main() {
 	flag.Usage = usage
 	flag.Parse()
-	if args := flag.Args(); len(args) == 0 {
-		trygo.NewGenGoGenerate(*outDir)
+
+	gen, err := trygo.NewGen(*outDir)
+	if err != nil {
+		exit(err)
 	}
 
-	gen, err := trygo.NewGen(flag.Args(), *outDir)
-	if err != nil {
+	if err := gen.Generate(flag.Args()); err != nil {
 		exit(err)
 	}
 
