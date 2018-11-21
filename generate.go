@@ -130,11 +130,19 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 		parsed = append(parsed, p)
 	}
 
-	// TODO: Translate parsed ASTs per package
+	// Translate all parsed ASTs per package
+	for _, pkgs := range parsed {
+		for _, pkg := range pkgs {
+			if err := Translate(pkg, fset); err != nil {
+				return err
+			}
+		}
+	}
+
 	// TODO: Verify translated ASTs
 
-	for _, p := range parsed {
-		for _, pkg := range p {
+	for _, pkgs := range parsed {
+		for _, pkg := range pkgs {
 			for path, ast := range pkg.Files {
 				if err := gen.writeGoFile(path, ast, fset); err != nil {
 					return err
