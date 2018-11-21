@@ -42,7 +42,4 @@ func main() {
 	if err := gen.Generate(flag.Args()); err != nil {
 		exit(err)
 	}
-
-	// TODO
-	fmt.Println(gen)
 }
