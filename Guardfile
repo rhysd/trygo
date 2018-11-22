@@ -1,6 +1,8 @@
 YELLOW='[93m'
 RESET='[0m'
 
+ignore %r!^out/!
+
 def run(cmdline)
   puts "#{YELLOW}+#{cmdline}#{RESET}"
   system cmdline

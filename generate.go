@@ -58,7 +58,7 @@ func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
 			if !strings.HasSuffix(p, ".go") {
 				return nil
 			}
-			saw[filepath.Dir(path)] = struct{}{}
+			saw[filepath.Dir(p)] = struct{}{}
 			return nil
 		}); err != nil {
 			return nil, errors.Wrapf(err, "Cannot read directory %q", path)

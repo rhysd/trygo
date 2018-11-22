@@ -83,7 +83,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 		Cond: &ast.BinaryExpr{
 			X:  errIdent,
 			Y:  ast.NewIdent("nil"),
-			Op: token.EQL,
+			Op: token.NEQ,
 		},
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
@@ -105,7 +105,11 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 
 func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 	name, ok := call.Fun.(*ast.Ident)
-	if !ok || name.Name != "try" {
+	if !ok {
+		log("Skipped since callee was not var ref")
+		return nil, true
+	}
+	if name.Name != "try" {
 		log("Skipped since RHS is not calling 'try':", name.Name)
 		return nil, true
 	}
