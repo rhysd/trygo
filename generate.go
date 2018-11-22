@@ -36,10 +36,13 @@ func (gen *Gen) packageDirsForGoGenerate() ([]string, error) {
 	if _, ok := os.LookupEnv("GOFILE"); !ok {
 		return nil, errors.New("`trygo` was not run from `go generate` and no path is given. Nothing to generate")
 	}
+	log("Collect package dir for `go generate`")
 	return []string{cwd}, nil
 }
 
 func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
+	log("Collect package dir for given paths:", hi(paths))
+
 	saw := map[string]struct{}{}
 	for _, path := range paths {
 		if !filepath.IsAbs(path) {
@@ -101,14 +104,18 @@ func (gen *Gen) outFilePath(inpath string) string {
 
 func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) error {
 	outpath := gen.outFilePath(path)
+	log("Write translated file path:", path, "->", outpath)
+
 	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
 		return err
 	}
+
 	outfile, err := os.Create(outpath)
 	if err != nil {
 		return errors.Wrapf(err, "Cannot open output file %q", outpath)
 	}
 	defer outfile.Close()
+
 	w := bufio.NewWriter(outfile)
 	if err := format.Node(w, fset, file); err != nil {
 		var buf bytes.Buffer
@@ -136,14 +143,14 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 			if err := Translate(pkg, fset); err != nil {
 				return err
 			}
+			// TODO: Verify translated pkg
 		}
 	}
-
-	// TODO: Verify translated ASTs
 
 	for _, pkgs := range parsed {
 		for _, pkg := range pkgs {
 			for path, ast := range pkg.Files {
+				log("Write file", pkg.Name, hi(path))
 				if err := gen.writeGoFile(path, ast, fset); err != nil {
 					return err
 				}
@@ -155,14 +162,18 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 }
 
 func (gen *Gen) Generate(paths []string) error {
+	log("Create outdir:", hi(gen.OutDir))
 	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
 		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
 	}
-	pkgs, err := gen.PackageDirs(paths)
+
+	dirs, err := gen.PackageDirs(paths)
 	if err != nil {
 		return err
 	}
-	return gen.GeneratePackages(pkgs)
+	log("Package directories:", hi(dirs))
+
+	return gen.GeneratePackages(dirs)
 }
 
 func NewGen(outDir string) (*Gen, error) {

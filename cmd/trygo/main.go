@@ -15,6 +15,7 @@ Flags:`
 
 var (
 	outDir = flag.String("o", "", "Output directory path")
+	debug  = flag.Bool("debug", false, "Output debug log")
 )
 
 func exit(err error) {
@@ -33,6 +34,8 @@ func usage() {
 func main() {
 	flag.Usage = usage
 	flag.Parse()
+
+	trygo.InitLog(*debug)
 
 	gen, err := trygo.NewGen(*outDir)
 	if err != nil {

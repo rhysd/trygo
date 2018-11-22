@@ -15,6 +15,7 @@ type Trans struct {
 	Err        error
 	block      *ast.BlockStmt
 	blockIndex int
+	blockPos   string
 	file       *ast.File
 	varID      int
 }
@@ -22,6 +23,7 @@ type Trans struct {
 func (trans *Trans) errAt(node ast.Node, msg string) {
 	pos := trans.Files.Position(node.Pos())
 	trans.Err = errors.Errorf("%s: %v: Error: %s", pos, trans.Package.Name, msg)
+	log(trans.Err)
 }
 
 func (trans *Trans) errfAt(node ast.Node, format string, args ...interface{}) {
@@ -34,18 +36,6 @@ func (trans *Trans) genIdent() *ast.Ident {
 	return ast.NewIdent(fmt.Sprintf("_%d", id))
 }
 
-// insertStmt inserts given statement *before* current statement position
-func (trans *Trans) insertStmt(stmt ast.Stmt) {
-	prev := trans.block.List
-	l, r := prev[:trans.blockIndex], prev[trans.blockIndex:]
-	ls := make([]ast.Stmt, 0, len(prev)+1)
-	ls = append(ls, l...)
-	ls = append(ls, stmt)
-	ls = append(ls, r...)
-	trans.block.List = ls
-	trans.blockIndex++
-}
-
 // insertStmts inserts given statements *before* current statement position
 func (trans *Trans) insertStmts(stmts []ast.Stmt) {
 	prev := trans.block.List
@@ -56,14 +46,7 @@ func (trans *Trans) insertStmts(stmts []ast.Stmt) {
 	ls = append(ls, r...)
 	trans.block.List = ls
 	trans.blockIndex += len(stmts)
-}
-
-func (trans *Trans) removeCurrentStmt() {
-	ls := trans.block.List
-	l, r := ls[:trans.blockIndex], ls[:trans.blockIndex+1]
-	ls = append(l, r...)
-	trans.block.List = ls
-	trans.blockIndex--
+	log(hi(len(stmts)), "statements inserted to block at", trans.blockPos)
 }
 
 // insertIfErrChk generate error check if statement and insert it to current position.
@@ -93,6 +76,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 		Tok: token.DEFINE,
 		Rhs: []ast.Expr{call},
 	})
+	log("Generate", hi("$ret, err :="), "assignment for", call.Fun)
 
 	// Generate if err != nil { return err }
 	inserted = append(inserted, &ast.IfStmt{
@@ -112,6 +96,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 			},
 		},
 	})
+	log("Generate", hi("if err != nil"), "check for", call.Fun)
 
 	trans.insertStmts(inserted)
 
@@ -121,6 +106,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 	name, ok := call.Fun.(*ast.Ident)
 	if !ok || name.Name != "try" {
+		log("Skipped since RHS is not calling 'try':", name.Name)
 		return nil, true
 	}
 
@@ -136,6 +122,7 @@ func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 		return nil, false
 	}
 
+	log(hi("try() found:"), inner.Fun)
 	return inner, true
 }
 
@@ -146,6 +133,7 @@ func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.
 
 	maybeTryCall, ok := rhs[0].(*ast.CallExpr)
 	if !ok {
+		log("Skipped since RHS is not a call expression")
 		return trans, nil, false
 	}
 
@@ -175,36 +163,48 @@ func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.
 //     }
 //     var x = $tmp
 func (trans *Trans) visitSpec(spec *ast.ValueSpec) ast.Visitor {
+	pos := trans.Files.Position(spec.Pos())
+	log("Value spec", pos)
 	vis, idents, ok := trans.transDefRHS(spec.Values, len(spec.Names))
 	if !ok {
 		return vis
 	}
+	log(hi("Value spec translated"), "with idents", idents, "at", pos)
 	spec.Values = idents
 	return trans
 }
 
 func (trans *Trans) visitAssign(assign *ast.AssignStmt) ast.Visitor {
+	pos := trans.Files.Position(assign.Pos())
+	log("Assignment block", pos)
 	vis, idents, ok := trans.transDefRHS(assign.Rhs, len(assign.Lhs))
 	if !ok {
 		return vis
 	}
+	log(hi("Assignment translated"), "with idents", idents, "at", pos)
 	assign.Rhs = idents
 	return trans
 }
 
 func (trans *Trans) visitBlock(block *ast.BlockStmt) ast.Visitor {
-	b := trans.block  // push
-	id := trans.varID // push
+	pos := trans.Files.Position(block.Pos()).String()
+	log("Block statement start", pos)
+	b := trans.block          // push
+	id := trans.varID         // push
+	prevPos := trans.blockPos // push
 	trans.block = block
 	trans.varID = 0
 	trans.blockIndex = 0
+	trans.blockPos = pos
 	list := block.List // This assignment is necessary since block.List is modified?
 	for _, stmt := range list {
 		ast.Walk(trans, stmt)
 		trans.blockIndex++ // Cannot use index of this for loop since some statements may be inserted
 	}
-	trans.block = b  // pop
-	trans.varID = id // pop
+	trans.block = b          // pop
+	trans.varID = id         // pop
+	trans.blockPos = prevPos // pop
+	log("Block statement end", pos)
 	return nil
 }
 
@@ -232,13 +232,16 @@ func (trans *Trans) Visit(node ast.Node) ast.Visitor {
 // Translate is an entrypoint of translation. It translates TryGo code into Go code by modifying given
 // AST directly and returns error if happens
 func (trans *Trans) Translate() error {
+	n := hi(trans.Package.Name)
+	log("Translation start:", n)
 	ast.Walk(trans, trans.Package)
+	log("Translation done:", n)
 	return trans.Err
 }
 
 // NewTrans creates a new Trans instance with given package AST and tokens
 func NewTrans(pkg *ast.Package, fs *token.FileSet) *Trans {
-	return &Trans{pkg, fs, nil, nil, 0, nil, 0}
+	return &Trans{pkg, fs, nil, nil, 0, "(toplevel)", nil, 0}
 }
 
 // Translate translates TryGo code into Go code by modifying given AST directly
