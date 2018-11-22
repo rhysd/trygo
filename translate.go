@@ -36,8 +36,9 @@ func (trans *Trans) genIdent() *ast.Ident {
 
 // insertStmt inserts given statement *before* current statement position
 func (trans *Trans) insertStmt(stmt ast.Stmt) {
-	l, r := trans.block.List[:trans.blockIndex], trans.block.List[trans.blockIndex:]
-	ls := make([]ast.Stmt, 0, len(trans.block.List)+1)
+	prev := trans.block.List
+	l, r := prev[:trans.blockIndex], prev[trans.blockIndex:]
+	ls := make([]ast.Stmt, 0, len(prev)+1)
 	ls = append(ls, l...)
 	ls = append(ls, stmt)
 	ls = append(ls, r...)
@@ -47,13 +48,22 @@ func (trans *Trans) insertStmt(stmt ast.Stmt) {
 
 // insertStmts inserts given statements *before* current statement position
 func (trans *Trans) insertStmts(stmts []ast.Stmt) {
-	l, r := trans.block.List[:trans.blockIndex], trans.block.List[trans.blockIndex:]
-	ls := make([]ast.Stmt, 0, len(trans.block.List)+len(stmts))
+	prev := trans.block.List
+	l, r := prev[:trans.blockIndex], prev[trans.blockIndex:]
+	ls := make([]ast.Stmt, 0, len(prev)+len(stmts))
 	ls = append(ls, l...)
 	ls = append(ls, stmts...)
 	ls = append(ls, r...)
 	trans.block.List = ls
 	trans.blockIndex += len(stmts)
+}
+
+func (trans *Trans) removeCurrentStmt() {
+	ls := trans.block.List
+	l, r := ls[:trans.blockIndex], ls[:trans.blockIndex+1]
+	ls = append(l, r...)
+	trans.block.List = ls
+	trans.blockIndex--
 }
 
 // insertIfErrChk generate error check if statement and insert it to current position.
@@ -66,25 +76,23 @@ func (trans *Trans) insertStmts(stmts []ast.Stmt) {
 //     if err != nil {
 //       return $retvals, err
 //     }
-func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []*ast.Ident {
+func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 	inserted := make([]ast.Stmt, 0, 2)
 
-	// Generate _0, _1, err := $call
-	names := make([]*ast.Ident, 0, numRet+1) // +1 for err
+	// Generate LHS of the assignment
+	idents := make([]ast.Expr, 0, numRet+1) // +1 for err
 	for i := 0; i < numRet; i++ {
-		names = append(names, trans.genIdent())
+		idents = append(idents, trans.genIdent())
 	}
 	errIdent := ast.NewIdent("err")
-	names = append(names, errIdent)
-	def := &ast.ValueSpec{
-		Names:  names,
-		Values: []ast.Expr{call},
-	}
-	decl := &ast.GenDecl{
-		Tok:   token.VAR,
-		Specs: []ast.Spec{def},
-	}
-	inserted = append(inserted, &ast.DeclStmt{Decl: decl})
+	idents = append(idents, errIdent)
+
+	// Generate _0, _1, err := $call
+	inserted = append(inserted, &ast.AssignStmt{
+		Lhs: idents,
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{call},
+	})
 
 	// Generate if err != nil { return err }
 	inserted = append(inserted, &ast.IfStmt{
@@ -107,7 +115,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []*ast.Ident 
 
 	trans.insertStmts(inserted)
 
-	return names[:len(names)-1]
+	return idents[:len(idents)-1] // Omit last 'err'
 }
 
 func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
@@ -131,6 +139,32 @@ func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 	return inner, true
 }
 
+func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.Expr, bool) {
+	if len(rhs) != 1 {
+		return trans, nil, false
+	}
+
+	maybeTryCall, ok := rhs[0].(*ast.CallExpr)
+	if !ok {
+		return trans, nil, false
+	}
+
+	call, ok := trans.checkTryCall(maybeTryCall)
+	if !ok {
+		return nil, nil, false
+	}
+	if call == nil {
+		return trans, nil, false
+	}
+
+	tmpIdents := []ast.Expr{}
+	for _, ident := range trans.insertIfErrChk(call, numRet) {
+		tmpIdents = append(tmpIdents, ident)
+	}
+
+	return trans, tmpIdents, true
+}
+
 // visitSpec visits var $ident = ... or const $ident = ... for translation
 //   Before:
 //     var x = try(foo())
@@ -141,30 +175,20 @@ func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 //     }
 //     var x = $tmp
 func (trans *Trans) visitSpec(spec *ast.ValueSpec) ast.Visitor {
-	if len(spec.Values) != 1 {
-		return trans
-	}
-
-	maybeTryCall, ok := spec.Values[0].(*ast.CallExpr)
+	vis, idents, ok := trans.transDefRHS(spec.Values, len(spec.Names))
 	if !ok {
-		return trans
+		return vis
 	}
+	spec.Values = idents
+	return trans
+}
 
-	call, ok := trans.checkTryCall(maybeTryCall)
+func (trans *Trans) visitAssign(assign *ast.AssignStmt) ast.Visitor {
+	vis, idents, ok := trans.transDefRHS(assign.Rhs, len(assign.Lhs))
 	if !ok {
-		return nil
+		return vis
 	}
-	if call == nil {
-		return trans
-	}
-
-	tmpIdents := []ast.Expr{}
-	for _, ident := range trans.insertIfErrChk(call, len(spec.Names)) {
-		tmpIdents = append(tmpIdents, ident)
-	}
-
-	spec.Values = []ast.Expr(tmpIdents)
-
+	assign.Rhs = idents
 	return trans
 }
 
@@ -173,10 +197,11 @@ func (trans *Trans) visitBlock(block *ast.BlockStmt) ast.Visitor {
 	id := trans.varID // push
 	trans.block = block
 	trans.varID = 0
+	trans.blockIndex = 0
 	list := block.List // This assignment is necessary since block.List is modified?
-	for i, stmt := range list {
-		trans.blockIndex = i
+	for _, stmt := range list {
 		ast.Walk(trans, stmt)
+		trans.blockIndex++ // Cannot use index of this for loop since some statements may be inserted
 	}
 	trans.block = b  // pop
 	trans.varID = id // pop
@@ -193,6 +218,9 @@ func (trans *Trans) Visit(node ast.Node) ast.Visitor {
 	case *ast.ValueSpec:
 		// var or const
 		return trans.visitSpec(node)
+	case *ast.AssignStmt:
+		// := or =
+		return trans.visitAssign(node)
 	case *ast.File:
 		trans.file = node
 		return trans
