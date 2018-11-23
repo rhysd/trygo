@@ -76,6 +76,45 @@ func (trans *Trans) insertStmts(stmts []ast.Stmt) {
 	log(hi(len(stmts)), "statements inserted to block at", trans.blockPos)
 }
 
+func (trans *Trans) defaultValueOf(ty ast.Expr) (ast.Expr, bool) {
+	// TODO
+	// Type spec: https://golang.org/ref/spec#Types
+	//
+	// When it is builtin types:
+	//   int, complex32, byte, uint, uintptr... -> 0
+	//   bool -> false
+	//   float64, float32 -> 0.0
+	//   rune -> '\0'
+	//   string -> ""
+	//   error -> nil
+	// When it is builtin composition:
+	//   *T, chan T, []T, map[T]U, func(T...)U -> nil
+	//   [N]T -> [N]T{}
+	//   struct {...} -> struct{...}{}
+	// [DIFFICULT] When it is struct type or interface:
+	//   SomeStruct -> SomeStruct{}
+	//   SomeInterface -> nil
+	// [DIFFICULT] When it is wrapped type (e.g. type foo int):
+	//   Most case `foo` -> simply create default value `foo{}`
+	//   Type alias of interface -> nil
+	//
+	// In the [DIFFICULT] cases, set compsite literal `Ident{}` optimistically.
+	// When they cause type errors, fix them as `nil`. XXX
+	return ast.NewIdent("nil"), true
+}
+
+func (trans *Trans) buildDefaultValues(fields []*ast.Field) ([]ast.Expr, bool) {
+	retVals := make([]ast.Expr, 0, len(fields))
+	for _, field := range fields {
+		v, ok := trans.defaultValueOf(field.Type)
+		if !ok {
+			return nil, false
+		}
+		retVals = append(retVals, v)
+	}
+	return retVals, true
+}
+
 // insertIfErrChk generate error check if statement and insert it to current position.
 // And returns identifiers of variables which bind return values of the given call.
 //
@@ -105,6 +144,13 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 	})
 	log("Generate", hi("$ret, err :="), "assignment for", call.Fun)
 
+	retTys := trans.funcs.top().Results.List
+	retVals, ok := trans.buildDefaultValues(retTys[:len(retTys)-1]) // Omit last return type since it is fixed to 'error'
+	if !ok {
+		return nil
+	}
+	retVals = append(retVals, errIdent) // Add nil as the last return value
+
 	// Generate if err != nil { return err }
 	inserted = append(inserted, &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
@@ -115,10 +161,7 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
 				&ast.ReturnStmt{
-					Results: []ast.Expr{
-						// TODO: Calculate and add $retvals from visiting function declaration
-						errIdent,
-					},
+					Results: retVals,
 				},
 			},
 		},
