@@ -6,7 +6,32 @@ import (
 	"go/ast"
 	"go/token"
 	"reflect"
+	"strings"
 )
+
+type nodeStack []ast.Node
+
+func (ns nodeStack) push(n ast.Node) nodeStack {
+	return append(ns, n)
+}
+func (ns nodeStack) pop() nodeStack {
+	return ns[:len(ns)-1]
+}
+func (ns nodeStack) top() ast.Node {
+	return ns[len(ns)-1]
+}
+
+type funcTypeStack []*ast.FuncType
+
+func (ts funcTypeStack) push(t *ast.FuncType) funcTypeStack {
+	return append(ts, t)
+}
+func (ts funcTypeStack) pop() funcTypeStack {
+	return ts[:len(ts)-1]
+}
+func (ts funcTypeStack) top() *ast.FuncType {
+	return ts[len(ts)-1]
+}
 
 // Trans represents a state of translation
 type Trans struct {
@@ -18,6 +43,8 @@ type Trans struct {
 	blockPos   string
 	file       *ast.File
 	varID      int
+	parents    nodeStack
+	funcs      funcTypeStack
 }
 
 func (trans *Trans) errAt(node ast.Node, msg string) {
@@ -103,6 +130,10 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 	return idents[:len(idents)-1] // Omit last 'err'
 }
 
+// checkTryCall checks given try() call and returns inner call (the argument of the try call) since
+// try()'s argument must be function call. When it is not a try() call, it returns nil as first the
+// return value. When it is an invalid try() call, it sets the error to Err field and returns false
+// as the second return value.
 func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 	name, ok := call.Fun.(*ast.Ident)
 	if !ok {
@@ -126,27 +157,44 @@ func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 		return nil, false
 	}
 
+	if len(trans.funcs) == 0 {
+		trans.errAt(call, "try() function is used outside function")
+		return nil, false
+	}
+
+	rets := trans.funcs.top().Results.List
+	if len(rets) == 0 {
+		trans.errAt(call, "The function returns nothing. try() is not available")
+		return nil, false
+	}
+
+	ty := rets[len(rets)-1].Type
+	if ident, ok := ty.(*ast.Ident); !ok || ident.Name != "error" {
+		trans.errfAt(call, "The function does not return error as last return value. Last return type is %q", ty)
+		return nil, false
+	}
+
 	log(hi("try() found:"), inner.Fun)
 	return inner, true
 }
 
-func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.Expr, bool) {
+func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) ([]ast.Expr, bool) {
 	if len(rhs) != 1 {
-		return trans, nil, false
+		return nil, false
 	}
 
 	maybeTryCall, ok := rhs[0].(*ast.CallExpr)
 	if !ok {
 		log("Skipped since RHS is not a call expression")
-		return trans, nil, false
+		return nil, false
 	}
 
 	call, ok := trans.checkTryCall(maybeTryCall)
 	if !ok {
-		return nil, nil, false
+		return nil, false
 	}
 	if call == nil {
-		return trans, nil, false
+		return nil, false
 	}
 
 	tmpIdents := []ast.Expr{}
@@ -154,7 +202,7 @@ func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.
 		tmpIdents = append(tmpIdents, ident)
 	}
 
-	return trans, tmpIdents, true
+	return tmpIdents, true
 }
 
 // visitSpec visits var $ident = ... or const $ident = ... for translation
@@ -166,31 +214,29 @@ func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) (ast.Visitor, []ast.
 //         return err
 //     }
 //     var x = $tmp
-func (trans *Trans) visitSpec(spec *ast.ValueSpec) ast.Visitor {
+func (trans *Trans) visitSpec(spec *ast.ValueSpec) {
 	pos := trans.Files.Position(spec.Pos())
 	log("Value spec", pos)
-	vis, idents, ok := trans.transDefRHS(spec.Values, len(spec.Names))
+	idents, ok := trans.transDefRHS(spec.Values, len(spec.Names))
 	if !ok {
-		return vis
+		return
 	}
-	log(hi("Value spec translated"), "with idents", idents, "at", pos)
+	log(hi("Value spec translated"), "Assignee:", hi(spec.Names), "Tmp:", idents, "at", pos)
 	spec.Values = idents
-	return trans
 }
 
-func (trans *Trans) visitAssign(assign *ast.AssignStmt) ast.Visitor {
+func (trans *Trans) visitAssign(assign *ast.AssignStmt) {
 	pos := trans.Files.Position(assign.Pos())
 	log("Assignment block", pos)
-	vis, idents, ok := trans.transDefRHS(assign.Rhs, len(assign.Lhs))
+	idents, ok := trans.transDefRHS(assign.Rhs, len(assign.Lhs))
 	if !ok {
-		return vis
+		return
 	}
-	log(hi("Assignment translated"), "with idents", idents, "at", pos)
+	log(hi("Assignment translated"), "Assignee:", hi(assign.Lhs), "Tmp:", idents, "at", pos)
 	assign.Rhs = idents
-	return trans
 }
 
-func (trans *Trans) visitBlock(block *ast.BlockStmt) ast.Visitor {
+func (trans *Trans) visitBlock(block *ast.BlockStmt) {
 	pos := trans.Files.Position(block.Pos()).String()
 	log("Block statement start", pos)
 	b := trans.block          // push
@@ -209,43 +255,95 @@ func (trans *Trans) visitBlock(block *ast.BlockStmt) ast.Visitor {
 	trans.varID = id         // pop
 	trans.blockPos = prevPos // pop
 	log("Block statement end", pos)
-	return nil
+}
+
+func (trans *Trans) visitPre(node ast.Node) {
+	switch node := node.(type) {
+	case *ast.BlockStmt:
+		trans.visitBlock(node)
+	case *ast.ValueSpec:
+		// var or const
+		trans.visitSpec(node)
+	case *ast.AssignStmt:
+		// := or =
+		trans.visitAssign(node)
+	case *ast.FuncDecl:
+		trans.funcs = trans.funcs.push(node.Type)
+	case *ast.FuncLit:
+		trans.funcs = trans.funcs.push(node.Type)
+	case *ast.File:
+		trans.file = node
+	}
+}
+
+func (trans *Trans) visitPost(node ast.Node) {
+	switch node.(type) {
+	case *ast.FuncDecl:
+		trans.funcs = trans.funcs.pop()
+	case *ast.FuncLit:
+		trans.funcs = trans.funcs.pop()
+	}
 }
 
 func (trans *Trans) Visit(node ast.Node) ast.Visitor {
 	if trans.Err != nil {
 		return nil
 	}
-	switch node := node.(type) {
-	case *ast.BlockStmt:
-		return trans.visitBlock(node)
-	case *ast.ValueSpec:
-		// var or const
-		return trans.visitSpec(node)
-	case *ast.AssignStmt:
-		// := or =
-		return trans.visitAssign(node)
-	case *ast.File:
-		trans.file = node
-		return trans
-	default:
-		return trans
+
+	if node == nil {
+		n := trans.parents.top()
+		trans.parents = trans.parents.pop()
+		trans.visitPost(n)
+		return nil
 	}
+
+	trans.visitPre(node)
+
+	trans.parents = trans.parents.push(node)
+
+	// When no error occurred, always visit children. Stopping visiting children collapses parents stack.
+	// Note: It may be OK to return nil here. When return value is nil, we would also need to pop parents stack.
+	return trans
 }
 
 // Translate is an entrypoint of translation. It translates TryGo code into Go code by modifying given
 // AST directly and returns error if happens
 func (trans *Trans) Translate() error {
-	n := hi(trans.Package.Name)
-	log("Translation start:", n)
+	name := trans.Package.Name
+	log("Translation", hi("start: "+name))
 	ast.Walk(trans, trans.Package)
-	log("Translation done:", n)
+	log("Translation", hi("done: "+name))
+
+	// Check parents stack did not collapsed
+	if trans.Err == nil && len(trans.parents) != 0 {
+		ss := make([]string, 0, len(trans.parents))
+		for _, n := range trans.parents {
+			ss = append(ss, reflect.TypeOf(n).String())
+		}
+		s := strings.Join(ss, " -> ")
+		if s == "" {
+			s = "(empty)"
+		}
+		panic(fmt.Sprintf("Parents stack collapsed: TOP -> %s -> BOTTOM", s))
+	}
+
 	return trans.Err
 }
 
 // NewTrans creates a new Trans instance with given package AST and tokens
 func NewTrans(pkg *ast.Package, fs *token.FileSet) *Trans {
-	return &Trans{pkg, fs, nil, nil, 0, "(toplevel)", nil, 0}
+	return &Trans{
+		Package:    pkg,
+		Files:      fs,
+		Err:        nil,
+		block:      nil,
+		blockIndex: 0,
+		blockPos:   "(toplevel)",
+		file:       nil,
+		varID:      0,
+		parents:    nil,
+		funcs:      nil,
+	}
 }
 
 // Translate translates TryGo code into Go code by modifying given AST directly

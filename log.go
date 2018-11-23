@@ -8,7 +8,8 @@ import (
 
 var (
 	logEnabled bool
-	yellow     = color.New(color.FgYellow)
+	yellowC    = color.New(color.FgYellow)
+	redC       = color.New(color.FgRed)
 )
 
 func InitLog(enabled bool) {
@@ -25,9 +26,20 @@ func log(v ...interface{}) {
 	}
 }
 
+// hi highlights text in log message with yellow color
+//
+//   log("Hellow", hi("important"), "message")
 func hi(v ...interface{}) string {
 	if !logEnabled {
 		return ""
 	}
-	return yellow.Sprint(v...)
+	return yellowC.Sprint(v...)
+}
+
+// For debug. This function should not be used usually
+func red(v ...interface{}) string {
+	if !logEnabled {
+		return ""
+	}
+	return redC.Sprint(v...)
 }
