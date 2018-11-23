@@ -57,9 +57,9 @@ func try(ret... interface{}, err error) (... interface{})
 Actually `try()` is a set of macros which takes one function call and expands it to a code with error
 check.
 
-In following subsections, `$retvals` is expanded to zero-values of return values of the function.
-For example, when `try()` is used in `func () (int, error)`, `$retvals` will be `0`. When it is used
-in `func () (*SomeStruct, SomeInterface, SomeStruct, error)`, `$retvals` will be `nil, nil, SomeStruct`.
+In following subsections, `$zerovals` is expanded to zero-values of return values of the function.
+For example, when `try()` is used in `func () (int, error)`, `$zerovals` will be `0`. When it is used
+in `func () (*SomeStruct, SomeInterface, SomeStruct, error)`, `$zerovals` will be `nil, nil, SomeStruct`.
 
 ### Definition statement
 
@@ -74,12 +74,12 @@ Expanded to:
 ```
 $Vars, err := $CallExpr
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 
 var $Vars, err = $CallExpr
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 ```
 
@@ -94,7 +94,7 @@ Expanded to:
 ```
 $Assignee, err = $CallExpr
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 ```
 
@@ -127,7 +127,7 @@ Expanded to:
 ```
 if err := $CallExpr; err != nil
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 ```
 
@@ -140,11 +140,11 @@ x := try(Foo(try($CallExpr), arg))
 ```
 tmp, err := $CallExpr
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 x, err := Foo(tmp, arg)
 if err != nil {
-    return $retvals, err
+    return $zerovals, err
 }
 ```
 
@@ -186,3 +186,5 @@ $ go get -u github.com/rhysd/trygo/cmd/trygo
 ## License
 
 [MIT License](LICENSE.txt)
+
+TODO: まずは $retvals, err := Foo(...) に変換したあと，後ろの if err != nil を入れないでおく．次に型チェックして $retvals の型を得る．再度 AST をトラバースして該当箇所の型情報を手に入れ，if err != nil を補完する

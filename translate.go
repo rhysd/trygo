@@ -76,7 +76,15 @@ func (trans *Trans) insertStmts(stmts []ast.Stmt) {
 	log(hi(len(stmts)), "statements inserted to block at", trans.blockPos)
 }
 
-func (trans *Trans) defaultValueOf(ty ast.Expr) (ast.Expr, bool) {
+func (trans *Trans) removeCurrentStmt() {
+	prev := trans.block.List
+	l, r := prev[:trans.blockIndex], prev[trans.blockIndex+1:]
+	trans.block.List = append(l, r...)
+	trans.blockIndex--
+	log(hi(trans.blockIndex+1, "th statement was removed from block at", trans.blockPos))
+}
+
+func (trans *Trans) zeroValueOf(ty ast.Expr) (ast.Expr, bool) {
 	// TODO
 	// Type spec: https://golang.org/ref/spec#Types
 	//
@@ -106,7 +114,7 @@ func (trans *Trans) defaultValueOf(ty ast.Expr) (ast.Expr, bool) {
 func (trans *Trans) buildDefaultValues(fields []*ast.Field) ([]ast.Expr, bool) {
 	retVals := make([]ast.Expr, 0, len(fields))
 	for _, field := range fields {
-		v, ok := trans.defaultValueOf(field.Type)
+		v, ok := trans.zeroValueOf(field.Type)
 		if !ok {
 			return nil, false
 		}
@@ -123,7 +131,7 @@ func (trans *Trans) buildDefaultValues(fields []*ast.Field) ([]ast.Expr, bool) {
 //   After:
 //     _0, _1, err := foo()
 //     if err != nil {
-//       return $retvals, err
+//       return $zerovals, err
 //     }
 func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 	inserted := make([]ast.Stmt, 0, 2)
@@ -177,7 +185,13 @@ func (trans *Trans) insertIfErrChk(call *ast.CallExpr, numRet int) []ast.Expr {
 // try()'s argument must be function call. When it is not a try() call, it returns nil as first the
 // return value. When it is an invalid try() call, it sets the error to Err field and returns false
 // as the second return value.
-func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
+func (trans *Trans) checkTryCall(maybeCall ast.Expr) (*ast.CallExpr, bool) {
+	call, ok := maybeCall.(*ast.CallExpr)
+	if !ok {
+		log("Skipped since expression is not a call expression")
+		return nil, true
+	}
+
 	name, ok := call.Fun.(*ast.Ident)
 	if !ok {
 		log("Skipped since callee was not var ref")
@@ -193,7 +207,6 @@ func (trans *Trans) checkTryCall(call *ast.CallExpr) (*ast.CallExpr, bool) {
 		return nil, false
 	}
 
-	// TODO: Check callee returns an error as the last return value
 	inner, ok := call.Args[0].(*ast.CallExpr)
 	if !ok {
 		trans.errfAt(call, "try() call's argument must be function call but found %s", reflect.TypeOf(call.Args[0]))
@@ -226,17 +239,8 @@ func (trans *Trans) transDefRHS(rhs []ast.Expr, numRet int) ([]ast.Expr, bool) {
 		return nil, false
 	}
 
-	maybeTryCall, ok := rhs[0].(*ast.CallExpr)
-	if !ok {
-		log("Skipped since RHS is not a call expression")
-		return nil, false
-	}
-
-	call, ok := trans.checkTryCall(maybeTryCall)
-	if !ok {
-		return nil, false
-	}
-	if call == nil {
+	call, ok := trans.checkTryCall(rhs[0])
+	if !ok || call == nil {
 		return nil, false
 	}
 
@@ -279,6 +283,60 @@ func (trans *Trans) visitAssign(assign *ast.AssignStmt) {
 	assign.Rhs = idents
 }
 
+// Before:
+//   try(f(...))
+// After
+//   if err := f(...); err != nil {
+//       return $zerovals, err
+//   }
+func (trans *Trans) visitToplevelExpr(expr ast.Expr) {
+	call, ok := trans.checkTryCall(expr)
+	if !ok {
+		return
+	}
+
+	if call == nil {
+		ast.Walk(trans, expr)
+		return
+	}
+
+	errIdent := ast.NewIdent("err")
+	retTys := trans.funcs.top().Results.List
+	retVals, ok := trans.buildDefaultValues(retTys[:len(retTys)-1]) // Omit last return type since it is fixed to 'error'
+	if !ok {
+		return
+	}
+	retVals = append(retVals, errIdent) // Add nil as the last return value
+
+	assign := &ast.AssignStmt{
+		Lhs: []ast.Expr{errIdent},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{call},
+	}
+
+	ifstmt := &ast.IfStmt{
+		Init: assign,
+		Cond: &ast.BinaryExpr{
+			X:  errIdent,
+			Y:  ast.NewIdent("nil"),
+			Op: token.NEQ,
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ReturnStmt{
+					Results: retVals,
+				},
+			},
+		},
+	}
+
+	// Insert replacing if err := ... {} clause before try() call
+	trans.insertStmts([]ast.Stmt{ifstmt})
+
+	// Finally remove replaced toplevel try() call
+	trans.removeCurrentStmt()
+}
+
 func (trans *Trans) visitBlock(block *ast.BlockStmt) {
 	pos := trans.Files.Position(block.Pos()).String()
 	log("Block statement start", pos)
@@ -291,7 +349,14 @@ func (trans *Trans) visitBlock(block *ast.BlockStmt) {
 	trans.blockPos = pos
 	list := block.List // This assignment is necessary since block.List is modified?
 	for _, stmt := range list {
-		ast.Walk(trans, stmt)
+		if trans.Err != nil {
+			return
+		}
+		if e, ok := stmt.(*ast.ExprStmt); ok {
+			trans.visitToplevelExpr(e.X)
+		} else {
+			ast.Walk(trans, stmt)
+		}
 		trans.blockIndex++ // Cannot use index of this for loop since some statements may be inserted
 	}
 	trans.block = b          // pop
@@ -312,19 +377,24 @@ func (trans *Trans) visitPre(node ast.Node) {
 		trans.visitAssign(node)
 	case *ast.FuncDecl:
 		trans.funcs = trans.funcs.push(node.Type)
+		log("Start function:", hi(node.Name.Name))
 	case *ast.FuncLit:
 		trans.funcs = trans.funcs.push(node.Type)
+		log("Start function literal")
 	case *ast.File:
+		log("File:", hi(node.Name.Name+".go"))
 		trans.file = node
 	}
 }
 
 func (trans *Trans) visitPost(node ast.Node) {
-	switch node.(type) {
+	switch node := node.(type) {
 	case *ast.FuncDecl:
 		trans.funcs = trans.funcs.pop()
+		log("End function:", hi(node.Name.Name))
 	case *ast.FuncLit:
 		trans.funcs = trans.funcs.pop()
+		log("End function literal")
 	}
 }
 
