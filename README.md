@@ -2,6 +2,8 @@ TryGo: Go with 'try' operator
 =============================
 
 This is a translator of 'TryGo' as my experiment that what happens if Go were having 'try' function.
+Basic idea of `try()` came from Rust's `try!` macro (or `?` operator). `try()` handles `if err != nil`
+check implicitly.
 
 Go:
 
@@ -46,20 +48,20 @@ There is only one difference between Go and TryGo. Special magic function `try()
 
 ## Spec
 
-Basic idea of `try()` came from Rust's `try!` macro (or `?` operator). `try` looks function, but
-actually it is a special operator. It has variadic parameters and return values.
-In terms of Go, `try` looks like:
+`try` looks function, but actually it is a special operator. It has variadic parameters and variadic
+return values. In terms of Go, `try` looks like:
 
 ```
 func try(ret... interface{}, err error) (... interface{})
 ```
 
 Actually `try()` is a set of macros which takes one function call and expands it to a code with error
-check.
+check. It takes one function call as argument since Go only allows multiple values as return values
+of function call.
 
 In following subsections, `$zerovals` is expanded to zero-values of return values of the function.
 For example, when `try()` is used in `func () (int, error)`, `$zerovals` will be `0`. When it is used
-in `func () (*SomeStruct, SomeInterface, SomeStruct, error)`, `$zerovals` will be `nil, nil, SomeStruct`.
+in `func () (*SomeStruct, SomeInterface, SomeStruct, error)`, `$zerovals` will be `nil, nil, SomeStruct{}`.
 
 ### Definition statement
 

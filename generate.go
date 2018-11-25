@@ -108,7 +108,7 @@ func (gen *Gen) outFilePath(inpath string) string {
 
 func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) error {
 	outpath := gen.outFilePath(path)
-	log("Write translated file path:", hi(relPath(path)), "->", hi(relPath(outpath)))
+	log("Write translated file:", hi(relPath(path)), "->", hi(relPath(outpath)))
 
 	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
 		return err
@@ -143,8 +143,8 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 
 	// Translate all parsed ASTs per package
 	for _, pkgs := range parsed {
-		for _, pkg := range pkgs {
-			if err := Translate(pkg, fset); err != nil {
+		for dir, pkg := range pkgs {
+			if err := Translate(dir, pkg, fset); err != nil {
 				return err
 			}
 			// TODO: Verify translated pkg
