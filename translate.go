@@ -39,50 +39,50 @@ func (ns nodeStack) assertEmpty(forWhat string) {
 	panic(fmt.Sprintf("AST node stack for %s is not fully poped: %s", forWhat, ns.show()))
 }
 
-type TransKind int
+type transKind int
 
 const (
-	TransInvalid TransKind = iota
-	TransValueSpec
-	TransAssign
-	TransToplevelCall
-	TransExpr
+	transKindInvalid transKind = iota
+	transKindValueSpec
+	transKindAssign
+	transKindToplevelCall
+	transKindExpr
 )
 
-func (kind TransKind) String() string {
+func (kind transKind) String() string {
 	switch kind {
-	case TransValueSpec:
+	case transKindValueSpec:
 		return "TransValueSpec"
-	case TransAssign:
+	case transKindAssign:
 		return "TransAssign"
-	case TransToplevelCall:
+	case transKindToplevelCall:
 		return "TransToplevelCall"
-	case TransExpr:
+	case transKindExpr:
 		return "TransExpr"
-	case TransInvalid:
+	case transKindInvalid:
 		return "TransInvalid"
 	default:
 		panic("Unreachable")
 	}
 }
 
-type TransPoint struct {
-	Kind TransKind
+type transPoint struct {
+	kind transKind
 	// The target node. It must be one of *ast.ValueSpec, *ast.AssignStmt, *ast.ExprStmt, *ast.CallExpr.
 	//   AssignStmt -> $vals, err = try(...) or $vals, err := try(...) (Depends on Tok field value)
 	//   ValueStmt  -> var $vals, err = try(...)
 	//   CallExpr   -> standalone try(...) call in general expressions
 	//   ExprStmt   -> ExprStmt at toplevel of block
-	Node       ast.Node
-	Block      *ast.BlockStmt
-	BlockIndex int
+	node       ast.Node
+	block      *ast.BlockStmt
+	blockIndex int
 	Func       ast.Node      // *ast.FuncDecl or *ast.FuncLit
-	Call       *ast.CallExpr // Function call in try() invocation
-	Parent     ast.Node
-	Pos        token.Pos
+	call       *ast.CallExpr // Function call in try() invocation
+	parent     ast.Node
+	pos        token.Pos
 }
 
-func (tp *TransPoint) funcType() *ast.FuncType {
+func (tp *transPoint) funcType() *ast.FuncType {
 	switch f := tp.Func.(type) {
 	case *ast.FuncLit:
 		return f.Type
@@ -96,7 +96,7 @@ func (tp *TransPoint) funcType() *ast.FuncType {
 type blockTree struct {
 	ast *ast.BlockStmt
 	// transPoints *must* be in the order of statements in the block. Earlier statement must be before later statement in this slice.
-	transPoints []*TransPoint
+	transPoints []*transPoint
 	children    []*blockTree
 	parent      *blockTree
 }
@@ -197,7 +197,7 @@ func (tce *tryCallElimination) checkTryCall(maybeCall ast.Expr) (tryCall *ast.Ca
 	return outer, inner, true
 }
 
-func (tce *tryCallElimination) eliminateTryCall(kind TransKind, node ast.Node, maybeTryCall ast.Expr) bool {
+func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, maybeTryCall ast.Expr) bool {
 	tryCall, innerCall, ok := tce.checkTryCall(maybeTryCall)
 	if !ok || tryCall == nil {
 		log("Skipped since the function call is not try() call or invalid try() call")
@@ -210,15 +210,15 @@ func (tce *tryCallElimination) eliminateTryCall(kind TransKind, node ast.Node, m
 	// Squash try() call with inner call: try(f(...)) -> f(...)
 	*tryCall = *innerCall
 
-	p := &TransPoint{
-		Kind:       kind,
-		Node:       node,
-		Block:      tce.currentBlk.ast,
-		BlockIndex: tce.blkIndex,
+	p := &transPoint{
+		kind:       kind,
+		node:       node,
+		block:      tce.currentBlk.ast,
+		blockIndex: tce.blkIndex,
 		Func:       tce.funcs.top(),
-		Call:       tryCall, // tryCall points inner call here
-		Parent:     tce.parents.top(),
-		Pos:        pos,
+		call:       tryCall, // tryCall points inner call here
+		parent:     tce.parents.top(),
+		pos:        pos,
 	}
 	tce.currentBlk.transPoints = append(tce.currentBlk.transPoints, p)
 
@@ -240,7 +240,7 @@ func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
 		return
 	}
 
-	if ok := tce.eliminateTryCall(TransValueSpec, spec, spec.Values[0]); !ok {
+	if ok := tce.eliminateTryCall(transKindValueSpec, spec, spec.Values[0]); !ok {
 		return
 	}
 
@@ -268,7 +268,7 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 		return
 	}
 
-	if ok := tce.eliminateTryCall(TransAssign, assign, assign.Rhs[0]); !ok {
+	if ok := tce.eliminateTryCall(transKindAssign, assign, assign.Rhs[0]); !ok {
 		return
 	}
 
@@ -294,7 +294,7 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	log("Assignment at", pos)
 
 	expr := stmt.X
-	if ok := tce.eliminateTryCall(TransValueSpec, stmt, expr); !ok {
+	if ok := tce.eliminateTryCall(transKindValueSpec, stmt, expr); !ok {
 		return
 	}
 
@@ -543,7 +543,7 @@ func (nci *nilCheckInsertion) insertIfNilChkExprAt(index int, call *ast.CallExpr
 	nci.insertIfNilChkStmtAfter(index, errIdent, assign, numRetVals)
 }
 
-func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *TransPoint) {
+func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) {
 	// From:
 	//   var $retvals, _ = f(...)
 	// To:
@@ -553,10 +553,10 @@ func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *TransPo
 	//   }
 	errIdent := ast.NewIdent("err")
 	node.Names[len(node.Names)-1] = errIdent
-	nci.insertIfNilChkStmtAfter(trans.BlockIndex, errIdent, nil, trans.funcType().Results.NumFields())
+	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.funcType().Results.NumFields())
 }
 
-func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *TransPoint) {
+func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoint) {
 	// From:
 	//   $retvals, _ := f(...)
 	// To:
@@ -568,7 +568,7 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *TransPoin
 		log("Define statement(:=) is translated")
 		errIdent := ast.NewIdent("err")
 		node.Lhs[len(node.Lhs)-1] = errIdent
-		nci.insertIfNilChkStmtAfter(trans.BlockIndex, errIdent, nil, trans.funcType().Results.NumFields())
+		nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.funcType().Results.NumFields())
 		return
 	}
 
@@ -597,34 +597,34 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *TransPoin
 		},
 	}
 	// Insert `var _err$n error`
-	nci.insertStmtsAt(trans.BlockIndex, []ast.Stmt{decl})
+	nci.insertStmtsAt(trans.blockIndex, []ast.Stmt{decl})
 
 	node.Lhs[len(node.Lhs)-1] = errIdent
-	nci.insertIfNilChkStmtAfter(trans.BlockIndex, errIdent, nil, trans.funcType().Results.NumFields())
+	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.funcType().Results.NumFields())
 }
 
-func (nci *nilCheckInsertion) transToplevelExpr(trans *TransPoint) {
+func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) {
 	// From:
 	//   f(...)
 	// To:
 	//   if $ignores, err := f(...); err != nil {
 	//     return $zerovals, err
 	//   }
-	nci.insertIfNilChkExprAt(trans.BlockIndex, trans.Call, trans.funcType().Results.NumFields())
+	nci.insertIfNilChkExprAt(trans.blockIndex, trans.call, trans.funcType().Results.NumFields())
 }
 
-func (nci *nilCheckInsertion) insertNilCheck(trans *TransPoint) error {
-	pos := nci.fileset.Position(trans.Pos)
-	log(hi("Insert if err != nil check for "+trans.Kind.String()), "at", pos)
+func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
+	pos := nci.fileset.Position(trans.pos)
+	log(hi("Insert if err != nil check for "+trans.kind.String()), "at", pos)
 
-	switch trans.Kind {
-	case TransValueSpec:
-		nci.transValueSpec(trans.Node.(*ast.ValueSpec), trans)
-	case TransAssign:
-		nci.transAssign(trans.Node.(*ast.AssignStmt), trans)
-	case TransToplevelCall:
+	switch trans.kind {
+	case transKindValueSpec:
+		nci.transValueSpec(trans.node.(*ast.ValueSpec), trans)
+	case transKindAssign:
+		nci.transAssign(trans.node.(*ast.AssignStmt), trans)
+	case transKindToplevelCall:
 		nci.transToplevelExpr(trans)
-	case TransExpr:
+	case transKindExpr:
 		panic("TODO")
 	default:
 		panic("Unreachable")
