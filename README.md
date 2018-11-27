@@ -1,14 +1,16 @@
 TryGo: Go with 'try' operator
 =============================
 
-This is a translator of 'TryGo' as my experiment that what happens if Go were having 'try' function.
+This is a translator of 'TryGo' as my experiment to see what happens if Go were having `try()` function.
 Basic idea of `try()` came from Rust's `try!` macro (or `?` operator). `try()` handles `if err != nil`
 check implicitly.
+
+This package provides a code translator from TryGo (Go with `try()`) to Go.
 
 Go:
 
 ```go
-func CreateFile(subdir, filename string, content []byte) error {
+func CreateFileInSubdir(subdir, filename string, content []byte) error {
     cwd, err := os.Getwd()
     if err != nil {
         return err
@@ -34,7 +36,7 @@ func CreateFile(subdir, filename string, content []byte) error {
 TryGo:
 
 ```go
-func CreateFile(subdir, filename string, content []byte) error {
+func CreateFileInSubdir(subdir, filename string, content []byte) error {
     cwd := try(os.Getwd())
     try(os.Mkdir(filepath.Join(cwd, subdir)))
     f := try(os.Create(filepath.Join(cwd, subdir, filename)))
