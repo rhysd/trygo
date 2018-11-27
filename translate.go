@@ -127,9 +127,12 @@ func (tce *tryCallElimination) assertPostCondition() {
 	}
 }
 
+func (tce *tryCallElimination) nodePos(node ast.Node) token.Position {
+	return tce.fileset.Position(node.Pos())
+}
+
 func (tce *tryCallElimination) errAt(node ast.Node, msg string) {
-	pos := tce.fileset.Position(node.Pos())
-	tce.err = errors.Errorf("%s: %v: Error: %s", pos, tce.pkg.Name, msg)
+	tce.err = errors.Errorf("%s: %v: Error: %s", tce.nodePos(node), tce.pkg.Name, msg)
 	log(ftl(tce.err))
 }
 
@@ -205,7 +208,7 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 	}
 
 	pos := tryCall.Pos()
-	log(hi("Eliminate try() call"), "for kind", kind, "at", tce.fileset.Position(pos))
+	log(hi("Eliminate try() call"), "for kind", kind, "at", tce.nodePos(tryCall))
 
 	// Squash try() call with inner call: try(f(...)) -> f(...)
 	*tryCall = *innerCall
@@ -229,7 +232,7 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 }
 
 func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
-	pos := tce.fileset.Position(spec.Pos())
+	pos := tce.nodePos(spec)
 	log("Value spec at", pos)
 
 	if len(spec.Values) != 1 {
@@ -290,7 +293,7 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 }
 
 func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
-	pos := tce.fileset.Position(stmt.Pos())
+	pos := tce.nodePos(stmt)
 	log("Assignment at", pos)
 
 	expr := stmt.X
@@ -302,21 +305,19 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 }
 
 func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
-	pos := tce.fileset.Position(block.Pos()).String()
+	pos := tce.nodePos(block)
 	log("Block statement start", pos)
 
-	tree := &blockTree{ast: block, parent: tce.parentBlk}
+	parent := tce.currentBlk
+	tree := &blockTree{ast: block, parent: parent}
 	if tree.isRoot() {
-		if tce.currentBlk != nil {
-			panic("FATAL: Root tree is not set after visiting block at " + tce.fileset.Position(tce.currentBlk.ast.Pos()).String())
-		}
 		log("New root block added at", pos)
 		tce.roots = append(tce.roots, tree)
 	} else {
-		tce.parentBlk.children = append(tce.parentBlk.children, tree)
+		parent.children = append(parent.children, tree)
 	}
 
-	tce.parentBlk = tce.currentBlk
+	tce.parentBlk = parent
 	tce.currentBlk = tree
 	prevIdx := tce.blkIndex
 
@@ -336,10 +337,11 @@ func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
 	}
 
 	tce.blkIndex = prevIdx
-	tce.currentBlk = tce.parentBlk
-	if !tree.isRoot() {
+	if tce.parentBlk != nil {
 		tce.parentBlk = tce.parentBlk.parent
 	}
+	tce.currentBlk = tce.parentBlk
+
 	log("Block statement end", pos)
 }
 
@@ -463,6 +465,10 @@ type nilCheckInsertion struct {
 	pkgTypes *types.Package
 }
 
+func (nci *nilCheckInsertion) nodePos(node ast.Node) token.Position {
+	return nci.fileset.Position(node.Pos())
+}
+
 func (nci *nilCheckInsertion) genIdent() *ast.Ident {
 	id := nci.varID
 	nci.varID++
@@ -488,7 +494,7 @@ func (nci *nilCheckInsertion) insertStmtsAt(idx int, stmts []ast.Stmt) {
 	ls = append(ls, r...)
 	nci.blk.List = ls
 	nci.offset += len(stmts)
-	log(hi(len(stmts)), "statements inserted to block at", nci.fileset.Position(nci.blk.Pos()))
+	log(hi(len(stmts)), "statements inserted to block at", nci.nodePos(nci.blk))
 }
 
 func (nci *nilCheckInsertion) removeStmtAt(idx int) {
@@ -497,7 +503,7 @@ func (nci *nilCheckInsertion) removeStmtAt(idx int) {
 	l, r := prev[:idx], prev[idx+1:]
 	nci.blk.List = append(l, r...)
 	nci.offset--
-	log(hi(idx+1, "th statement was removed from block at", nci.fileset.Position(nci.blk.Pos())))
+	log(hi(idx+1, "th statement was removed from block at", nci.nodePos(nci.blk)))
 }
 
 // TODO: Take type information of zero values to return in 'if' statement body instead of numRetVals
@@ -526,11 +532,11 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 	}
 
 	nci.insertStmtsAt(index+1, []ast.Stmt{stmt})
-	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.fileset.Position(nci.blk.Pos()))
+	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.nodePos(nci.blk))
 }
 
 func (nci *nilCheckInsertion) insertIfNilChkExprAt(index int, call *ast.CallExpr, numRetVals int) {
-	log("Inserting if err := $call; err != nil { ... } at index", index, "of block at", nci.fileset.Position(nci.blk.Pos()))
+	log("Inserting if err := $call; err != nil { ... } at index", index, "of block at", nci.nodePos(nci.blk))
 	nci.removeStmtAt(index)
 
 	errIdent := ast.NewIdent("err")
@@ -551,7 +557,7 @@ func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPo
 	//   if err != nil {
 	//     return $zerovals, err
 	//   }
-	errIdent := ast.NewIdent("err")
+	errIdent := nci.genErrIdent()
 	node.Names[len(node.Names)-1] = errIdent
 	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.funcType().Results.NumFields())
 }
@@ -566,7 +572,7 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	//   }
 	if node.Tok == token.DEFINE {
 		log("Define statement(:=) is translated")
-		errIdent := ast.NewIdent("err")
+		errIdent := nci.genErrIdent()
 		node.Lhs[len(node.Lhs)-1] = errIdent
 		nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.funcType().Results.NumFields())
 		return
@@ -638,7 +644,7 @@ func (nci *nilCheckInsertion) block(b *blockTree) error {
 	nci.offset = 0
 	nci.varID = 0
 
-	pos := nci.fileset.Position(b.ast.Pos())
+	pos := nci.nodePos(b.ast)
 	log("Start nil check insertion for block at", pos)
 	for _, trans := range b.transPoints {
 		if err := nci.insertNilCheck(trans); err != nil {
