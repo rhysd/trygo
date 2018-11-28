@@ -106,6 +106,16 @@ func (gen *Gen) outFilePath(inpath string) string {
 	return filepath.Join(gen.OutDir, part)
 }
 
+func (gen *Gen) writeGo(out io.Writer, file *ast.File, fset *token.FileSet) error {
+	w := bufio.NewWriter(out)
+	if err := format.Node(w, fset, file); err != nil {
+		var buf bytes.Buffer
+		ast.Fprint(&buf, fset, file, nil)
+		return errors.Wrapf(err, "Broken Go source: %s\n%s", file.Name.Name+".go", buf.String())
+	}
+	return w.Flush()
+}
+
 func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) error {
 	outpath := gen.outFilePath(path)
 	log("Write translated file:", hi(relPath(path)), "->", hi(relPath(outpath)))
@@ -120,14 +130,12 @@ func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) er
 	}
 	defer outfile.Close()
 
-	w := bufio.NewWriter(outfile)
-	if err := format.Node(w, fset, file); err != nil {
-		var buf bytes.Buffer
-		ast.Fprint(&buf, fset, file, nil)
-		return errors.Wrapf(err, "Broken Go source\n%s", buf.String())
+	if err := gen.writeGo(outfile, file, fset); err != nil {
+		return err
 	}
+
 	fmt.Fprintln(gen.Writer, outpath)
-	return w.Flush()
+	return nil
 }
 
 func (gen *Gen) GeneratePackages(pkgDirs []string) error {

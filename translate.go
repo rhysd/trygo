@@ -39,6 +39,12 @@ func (ns nodeStack) assertEmpty(forWhat string) {
 	panic(fmt.Sprintf("AST node stack for %s is not fully poped: %s", forWhat, ns.show()))
 }
 
+func newIdent(name string, pos token.Pos) *ast.Ident {
+	i := ast.NewIdent(name)
+	i.NamePos = pos
+	return i
+}
+
 type transKind int
 
 const (
@@ -76,14 +82,14 @@ type transPoint struct {
 	node       ast.Node
 	block      *ast.BlockStmt
 	blockIndex int
-	Func       ast.Node      // *ast.FuncDecl or *ast.FuncLit
+	fun        ast.Node      // *ast.FuncDecl or *ast.FuncLit
 	call       *ast.CallExpr // Function call in try() invocation
 	parent     ast.Node
 	pos        token.Pos
 }
 
 func (tp *transPoint) funcType() *ast.FuncType {
-	switch f := tp.Func.(type) {
+	switch f := tp.fun.(type) {
 	case *ast.FuncLit:
 		return f.Type
 	case *ast.FuncDecl:
@@ -108,8 +114,7 @@ func (tree *blockTree) isRoot() bool {
 func (tree *blockTree) collectTransPoints() []*transPoint {
 	pts := tree.transPoints
 	for _, c := range tree.children {
-		ps := c.collectTransPoints()
-		if len(ps) > 0 {
+		if ps := c.collectTransPoints(); len(ps) > 0 {
 			pts = append(pts, ps...)
 		}
 	}
@@ -229,7 +234,7 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 		node:       node,
 		block:      tce.currentBlk.ast,
 		blockIndex: tce.blkIndex,
-		Func:       tce.funcs.top(),
+		fun:        tce.funcs.top(),
 		call:       tryCall, // tryCall points inner call here
 		parent:     tce.parents.top(),
 		pos:        pos,
@@ -265,7 +270,7 @@ func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
 	//     var $retvals = try(f(...))
 	//   To:
 	//     $retvals, _ = f(...)
-	spec.Names = append(spec.Names, ast.NewIdent("_"))
+	spec.Names = append(spec.Names, newIdent("_", spec.Pos()))
 
 	log("Value spec at", pos, "added new translation point")
 }
@@ -298,7 +303,7 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 	//     $retvals = try(f(...))
 	//   To:
 	//     $retvals, _ = f(...)
-	assign.Lhs = append(assign.Lhs, ast.NewIdent("_"))
+	assign.Lhs = append(assign.Lhs, newIdent("_", assign.Pos()))
 
 	log("Assignment at", pos, "added new translation point")
 }
@@ -428,7 +433,7 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 
 	tys := map[ast.Expr]types.TypeAndValue{}
 	for _, trans := range transPts {
-		if lit, ok := trans.Func.(*ast.FuncLit); ok {
+		if lit, ok := trans.fun.(*ast.FuncLit); ok {
 			// For getting the return type of function for building zero values at if err != nil check body
 			tys[lit] = types.TypeAndValue{}
 		}
@@ -489,16 +494,16 @@ func (nci *nilCheckInsertion) nodePos(node ast.Node) token.Position {
 	return nci.fileset.Position(node.Pos())
 }
 
-func (nci *nilCheckInsertion) genIdent() *ast.Ident {
+func (nci *nilCheckInsertion) genIdent(pos token.Pos) *ast.Ident {
 	id := nci.varID
 	nci.varID++
-	return ast.NewIdent(fmt.Sprintf("_%d", id))
+	return newIdent(fmt.Sprintf("_%d", id), pos)
 }
 
-func (nci *nilCheckInsertion) genErrIdent() *ast.Ident {
-	id := nci.varID
+func (nci *nilCheckInsertion) genErrIdent(pos token.Pos) *ast.Ident {
+	i := newIdent(fmt.Sprintf("_err%d", nci.varID), pos)
 	nci.varID++
-	return ast.NewIdent(fmt.Sprintf("_err%d", id))
+	return i
 }
 
 func (nci *nilCheckInsertion) typeInfoFor(node ast.Expr) types.Type {
@@ -529,17 +534,17 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 // insertStmts inserts given statements *before* given index position of current block. If previous
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
-func (nci *nilCheckInsertion) insertStmtsAt(idx int, stmts []ast.Stmt) {
-	log("Insert", len(stmts), "statements to block at", nci.nodePos(nci.blk))
+func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
+	log("Insert %T statements to block at %s", stmt, nci.nodePos(nci.blk))
 	prev := nci.blk.List
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx:]
-	ls := make([]ast.Stmt, 0, len(prev)+len(stmts))
+	ls := make([]ast.Stmt, 0, len(prev)+1)
 	ls = append(ls, l...)
-	ls = append(ls, stmts...)
+	ls = append(ls, stmt)
 	ls = append(ls, r...)
 	nci.blk.List = ls
-	nci.offset += len(stmts)
+	nci.offset += 1
 }
 
 func (nci *nilCheckInsertion) removeStmtAt(idx int) {
@@ -551,40 +556,60 @@ func (nci *nilCheckInsertion) removeStmtAt(idx int) {
 	log(hi(idx+1, "th statement was removed from block at", nci.nodePos(nci.blk)))
 }
 
-func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, node ast.Expr) (expr ast.Expr) {
+func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos token.Pos) (expr ast.Expr) {
 	tyStr := ty.String()
 	log("Zero value will be calculated for", hi(tyStr))
 	switch ty := ty.(type) {
 	case *types.Basic:
 		switch ty.Kind() {
 		case types.Bool, types.UntypedBool, types.UntypedInt:
-			expr = ast.NewIdent("false")
+			expr = newIdent("false", pos)
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
 			types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64,
 			types.Uintptr:
-			expr = &ast.BasicLit{Kind: token.INT, Value: "0"}
+			expr = &ast.BasicLit{
+				Kind:     token.INT,
+				Value:    "0",
+				ValuePos: pos,
+			}
 		case types.Float32, types.Float64, types.UntypedFloat:
-			expr = &ast.BasicLit{Kind: token.FLOAT, Value: "0.0"}
+			expr = &ast.BasicLit{
+				Kind:     token.FLOAT,
+				Value:    "0.0",
+				ValuePos: pos,
+			}
 		case types.Complex64, types.Complex128, types.UntypedComplex:
-			expr = &ast.BasicLit{Kind: token.IMAG, Value: "0i"}
+			expr = &ast.BasicLit{
+				Kind:     token.IMAG,
+				Value:    "0i",
+				ValuePos: pos,
+			}
 		case types.String, types.UntypedString:
-			expr = &ast.BasicLit{Kind: token.STRING, Value: `""`}
+			expr = &ast.BasicLit{
+				Kind:     token.STRING,
+				Value:    `""`,
+				ValuePos: pos,
+			}
 		case types.UnsafePointer, types.UntypedNil:
-			expr = ast.NewIdent("nil")
+			expr = newIdent("nil", pos)
 		case types.UntypedRune:
-			expr = &ast.BasicLit{Kind: token.CHAR, Value: `'\0'`}
+			expr = &ast.BasicLit{
+				Kind:     token.CHAR,
+				Value:    `'\0'`,
+				ValuePos: pos,
+			}
 		default:
 			panic("Unreachable")
 		}
 	case *types.Array, *types.Slice, *types.Pointer, *types.Signature, *types.Interface, *types.Map, *types.Chan:
-		expr = ast.NewIdent("nil")
+		expr = newIdent("nil", pos)
 	case *types.Struct:
 		// To create CompositeLit for zero value of immediate struct, we reuse the AST node from return type of
 		// function declaration because reconstruct immediate struct type AST node from *types.Struct needs bunch
 		// of code for constructing ast.Expr from types.Type generally.
 		// Note that position of AST node is not correct.
-		expr = &ast.CompositeLit{Type: node}
-		log("AST type node at", nci.nodePos(node), "is reused to generate zero value of *types.Struct")
+		expr = &ast.CompositeLit{Type: typeNode}
+		log("AST type node at", nci.nodePos(typeNode), "is reused to generate zero value of *types.Struct")
 	case *types.Named:
 		u := ty.Underlying()
 		if _, ok := u.(*types.Struct); ok {
@@ -593,11 +618,11 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, node ast.Expr) (expr as
 			// There is no API to get package(pkg) and name(S) separately from types.Named. We need to parse string
 			// representation. Reusing the AST node is better than parsing.
 			// Note that position of AST node is not correct.
-			expr = &ast.CompositeLit{Type: node}
-			log("AST type node at", nci.nodePos(node), "is reused to generate zero value of *types.Named")
+			expr = &ast.CompositeLit{Type: typeNode}
+			log("AST type node at", nci.nodePos(typeNode), "is reused to generate zero value of *types.Named")
 			break
 		}
-		expr = nci.zeroValueOf(u, node)
+		expr = nci.zeroValueOf(u, typeNode, pos)
 	case *types.Tuple:
 		panic("Cannot obtain zero value of tuple: " + tyStr)
 	default:
@@ -613,33 +638,38 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 	if err != nil {
 		return err
 	}
+	pos := errIdent.NamePos
 	rets := funcTy.Results()
 	retLen := rets.Len()
 	retVals := make([]ast.Expr, 0, retLen)
 	for i := 0; i < retLen-1; i++ { // -1 since last type is 'error'
 		ret := rets.At(i).Type()
 		node := funcTyNode.Results.List[i].Type
-		retVals = append(retVals, nci.zeroValueOf(ret, node))
+		retVals = append(retVals, nci.zeroValueOf(ret, node, pos))
 	}
 	retVals = append(retVals, errIdent)
 
 	stmt := &ast.IfStmt{
+		If:   pos,
 		Init: init,
 		Cond: &ast.BinaryExpr{
-			X:  errIdent,
-			Y:  ast.NewIdent("nil"),
-			Op: token.NEQ,
+			X:     errIdent,
+			Y:     newIdent("nil", pos),
+			Op:    token.NEQ,
+			OpPos: pos,
 		},
 		Body: &ast.BlockStmt{
+			Lbrace: pos,
 			List: []ast.Stmt{
 				&ast.ReturnStmt{
 					Results: retVals,
+					Return:  pos,
 				},
 			},
 		},
 	}
 
-	nci.insertStmtsAt(index+1, []ast.Stmt{stmt})
+	nci.insertStmtAt(index+1, stmt)
 	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.nodePos(nci.blk))
 	return nil
 }
@@ -652,10 +682,10 @@ func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPo
 	//   if err != nil {
 	//     return $zerovals, err
 	//   }
-	errIdent := nci.genErrIdent()
+	errIdent := nci.genErrIdent(node.Pos())
 	log(hi("Start value spec (var =)"), "translation", errIdent.Name)
 	node.Names[len(node.Names)-1] = errIdent
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
 	log(hi("End value spec (var =)"), "translation", errIdent.Name, err)
 	return
 }
@@ -669,10 +699,10 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	//     return $zerovals, err
 	//   }
 	if node.Tok == token.DEFINE {
-		errIdent := nci.genErrIdent()
+		errIdent := nci.genErrIdent(node.Pos())
 		log(hi("Start define statement(:=)"), "translation", errIdent.Name)
 		node.Lhs[len(node.Lhs)-1] = errIdent
-		err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+		err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
 		log(hi("End define statement(:=)"), "translation", errIdent.Name, err)
 		return
 	}
@@ -686,7 +716,8 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	//     return $zerovals, _err$n
 	//   }
 	// Tok is token.EQ
-	errIdent := nci.genErrIdent()
+	pos := node.Pos()
+	errIdent := nci.genErrIdent(pos)
 	log(hi("Start assign statement(=)"), "translation", errIdent.Name)
 	decl := &ast.DeclStmt{
 		Decl: &ast.GenDecl{
@@ -696,16 +727,17 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 					Names: []*ast.Ident{
 						errIdent,
 					},
-					Type: ast.NewIdent("error"),
+					Type: newIdent("error", pos),
 				},
 			},
+			TokPos: pos,
 		},
 	}
 	// Insert `var _err$n error`
-	nci.insertStmtsAt(trans.blockIndex, []ast.Stmt{decl})
+	nci.insertStmtAt(trans.blockIndex, decl)
 
 	node.Lhs[len(node.Lhs)-1] = errIdent
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
 	log(hi("End assign statement(=)"), "translation", errIdent.Name, err)
 	return
 }
@@ -733,22 +765,24 @@ func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 
 	log("Insert `if $ignores, err := ...; err != nil` check for", trans.kind, "with", numIgnores, "'_' var at", nci.nodePos(trans.call))
 
+	pos := trans.pos
 	lhs := make([]ast.Expr, 0, numIgnores+1) // + 1 means the last 'error' variable
 	for i := 0; i < numIgnores; i++ {
-		lhs = append(lhs, ast.NewIdent("_"))
+		lhs = append(lhs, newIdent("_", pos))
 	}
-	errIdent := ast.NewIdent("err")
+	errIdent := newIdent("err", pos)
 	lhs = append(lhs, errIdent)
 
 	// Create err := ...
 	assign := &ast.AssignStmt{
-		Lhs: lhs,
-		Tok: token.DEFINE,
-		Rhs: []ast.Expr{trans.call},
+		Lhs:    lhs,
+		Tok:    token.DEFINE,
+		TokPos: pos,
+		Rhs:    []ast.Expr{trans.call},
 	}
 
 	// Insert if err := ...; err != nil { ... }
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, assign, trans.Func)
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, assign, trans.fun)
 
 	log(hi("End toplevel try()"), "translation", err)
 	return
@@ -766,7 +800,7 @@ func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
 	case transKindToplevelCall:
 		return nci.transToplevelExpr(trans)
 	case transKindExpr:
-		panic("TODO")
+		panic("TODO: Translate non-toplevel try() call expressions")
 	default:
 		panic("Unreachable")
 	}
@@ -786,7 +820,7 @@ func (nci *nilCheckInsertion) block(b *blockTree) error {
 	}
 	log("End nil check insertion for block at", pos)
 
-	log("Recursively insert nil check to", hi(len(b.children)), "children")
+	log("Recursively insert nil check to", hi(len(b.children)), "children in block at", pos)
 	for _, child := range b.children {
 		if err := nci.block(child); err != nil {
 			return err
