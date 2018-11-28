@@ -71,7 +71,7 @@ func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
 
 	l := len(saw)
 	if l == 0 {
-		return nil, errors.New("No Go package is included in given paths")
+		return nil, errors.Errorf("No Go package is included in given paths: %v", paths)
 	}
 
 	dirs := make([]string, 0, l)

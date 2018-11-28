@@ -1,7 +1,7 @@
 YELLOW='[93m'
 RESET='[0m'
 
-ignore %r!^out/!
+ignore %r!^out/!, %r!^testdata/!
 
 def run(cmdline)
   puts "#{YELLOW}+#{cmdline}#{RESET}"
@@ -16,7 +16,7 @@ guard :shell do
       parent = File.dirname m[0]
       sources = Dir["#{parent}/*.go"].reject{|p| p.end_with? '_test.go' }.uniq.join ' '
       # Assume that https://github.com/rhysd/gotest is installed
-      run "gotest #{sources}"
+      run "gotest #{m[0]} #{sources}"
       # run "golint #{m[0]}"
     else
       run 'go build ./cmd/trygo'

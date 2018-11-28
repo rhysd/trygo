@@ -131,7 +131,7 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 
 	pkg, _ := cfg.Check(pkgDir, fset, files, info)
 	if len(errs) > 0 {
-		return nil, nil, unifyTypeErrors("First type check after phase-1", errs)
+		return nil, nil, unifyTypeErrors("type check after phase-1", errs)
 	}
 
 	// TODO: Check $CallExpr as argument of try() returns error as the last return value
@@ -166,7 +166,7 @@ func verifyTranslation(pkgDir string, fset *token.FileSet, files []*ast.File) {
 	cfg.Check(pkgDir, fset, files, &types.Info{})
 
 	if len(errs) > 0 {
-		panic(unifyTypeErrors("Type check verification after phase-2", errs).Error())
+		panic(unifyTypeErrors("yype check verification after phase-2", errs).Error())
 	}
 }
 

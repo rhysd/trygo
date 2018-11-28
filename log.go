@@ -27,6 +27,12 @@ func log(v ...interface{}) {
 	}
 }
 
+func logf(format string, v ...interface{}) {
+	if logEnabled {
+		stdlog.Output(2, fmt.Sprintf(format+"\n", v...))
+	}
+}
+
 // hi highlights text in log message with yellow color
 //
 //   log("Hellow", hi("important"), "message")

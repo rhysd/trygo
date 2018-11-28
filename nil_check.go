@@ -71,7 +71,7 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
-	log("Insert %T statements to block at %s", stmt, nci.nodePos(nci.blk))
+	logf("Insert %T statements to block at %s", stmt, nci.nodePos(nci.blk))
 	prev := nci.blk.List
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx:]
