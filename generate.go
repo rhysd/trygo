@@ -138,33 +138,43 @@ func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) er
 	return nil
 }
 
-func (gen *Gen) GeneratePackages(pkgDirs []string) error {
-	parsed := make([]map[string]*ast.Package, 0, len(pkgDirs))
+func (gen *Gen) TranslatePackages(pkgDirs []string) (map[string]*ast.Package, *token.FileSet, error) {
+	log("Parse package directories:", pkgDirs)
+
+	parsed := make(map[string]*ast.Package, len(pkgDirs))
 	fset := token.NewFileSet()
 	for _, dir := range pkgDirs {
-		p, err := parser.ParseDir(fset, dir, nil, 0)
+		pkgs, err := parser.ParseDir(fset, dir, nil, 0)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		parsed = append(parsed, p)
+		for dir, pkg := range pkgs {
+			parsed[dir] = pkg
+		}
 	}
 
 	// Translate all parsed ASTs per package
-	for _, pkgs := range parsed {
-		for dir, pkg := range pkgs {
-			if err := Translate(dir, pkg, fset); err != nil {
-				return err
-			}
-			// TODO: Verify translated pkg
+	log("Translate parsed packages:", parsed)
+	for dir, pkg := range parsed {
+		if err := Translate(dir, pkg, fset); err != nil {
+			return nil, nil, err
 		}
 	}
 
-	for _, pkgs := range parsed {
-		for _, pkg := range pkgs {
-			for path, ast := range pkg.Files {
-				if err := gen.writeGoFile(path, ast, fset); err != nil {
-					return err
-				}
+	return parsed, fset, nil
+}
+
+func (gen *Gen) GeneratePackages(pkgDirs []string) error {
+	pkgs, fset, err := gen.TranslatePackages(pkgDirs)
+	if err != nil {
+		return err
+	}
+
+	log("Write translated packages to files:", pkgs)
+	for _, pkg := range pkgs {
+		for path, ast := range pkg.Files {
+			if err := gen.writeGoFile(path, ast, fset); err != nil {
+				return err
 			}
 		}
 	}

@@ -8,9 +8,9 @@ import (
 
 var (
 	logEnabled bool
-	yellowC    = color.New(color.FgYellow)
-	redC       = color.New(color.FgRed)
-	greenC     = color.New(color.FgGreen)
+	yellow     = color.New(color.FgYellow)
+	red        = color.New(color.FgRed)
+	green      = color.New(color.FgGreen)
 )
 
 func InitLog(enabled bool) {
@@ -34,7 +34,7 @@ func hi(v ...interface{}) string {
 	if !logEnabled {
 		return ""
 	}
-	return yellowC.Sprint(v...)
+	return yellow.Sprint(v...)
 }
 
 // ftl is for fatal message. This function should be used only for fatal error information
@@ -42,7 +42,7 @@ func ftl(v ...interface{}) string {
 	if !logEnabled {
 		return ""
 	}
-	return redC.Sprint(v...)
+	return red.Sprint(v...)
 }
 
 // dbg is for debugging. This function should not be used usually, but used for temporary highlighting
@@ -51,5 +51,5 @@ func dbg(v ...interface{}) string {
 	if !logEnabled {
 		return ""
 	}
-	return greenC.Sprint(v...)
+	return green.Sprint(v...)
 }
