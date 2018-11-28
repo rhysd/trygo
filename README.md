@@ -96,6 +96,7 @@ $Assignee = try($CallExpr)
 Expanded to:
 
 ```
+var err error
 $Assignee, err = $CallExpr
 if err != nil {
     return $zerovals, err
@@ -117,8 +118,8 @@ if $underscores, err := $CallExpr; err != nil {
 ```
 
 `$underscores,` is a set of `_`s which ignores all return values from `$CallExpr`. For example, when
-calling `func() (int, error)`, it is expanded to `_`. When calling `func() (A, B, error)`, it is expanded
-to `_, _`. When calling `func() error`, it is expanded to an empty.
+calling `func() (int, error)`, it is expanded to `_`. When calling `func() (A, B, error)` in `try()`,
+it is expanded to `_, _`. When calling `func() error` in `try()`, it is expanded to an empty.
 
 ### Expression
 
@@ -150,6 +151,27 @@ x, err := Foo(tmp, arg)
 if err != nil {
     return $zerovals, err
 }
+```
+
+The order of evaluation must be preserved. For example, when `try()` is used in a slice literal element,
+elements before the element must be calculated before the `if err != nil` check of the `try()`.
+
+For example,
+
+```
+ss := []string{"aaa", s1 + "x", try(f()), s2[:n]}
+```
+
+will be translated to
+
+```
+tmp1 := "aaa"
+tmp2 := s1 + "x"
+tmp3, err := f()
+if err != nil {
+    return $zerovals, err
+}
+ss := []string{tmp1, tmp2, tmp3, s2[:n]}
 ```
 
 ### Ill-formed cases
