@@ -52,15 +52,15 @@ const (
 func (kind transKind) String() string {
 	switch kind {
 	case transKindValueSpec:
-		return "TransValueSpec"
+		return "transValueSpec"
 	case transKindAssign:
-		return "TransAssign"
+		return "transAssign"
 	case transKindToplevelCall:
-		return "TransToplevelCall"
+		return "transToplevelCall"
 	case transKindExpr:
-		return "TransExpr"
+		return "transExpr"
 	case transKindInvalid:
-		return "TransInvalid"
+		return "transInvalid"
 	default:
 		panic("Unreachable")
 	}
@@ -307,8 +307,7 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	pos := tce.nodePos(stmt)
 	log("Assignment at", pos)
 
-	expr := stmt.X
-	if ok := tce.eliminateTryCall(transKindValueSpec, stmt, expr); !ok {
+	if ok := tce.eliminateTryCall(transKindToplevelCall, stmt, stmt.X); !ok {
 		return
 	}
 
@@ -430,7 +429,12 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 	tys := map[ast.Expr]types.TypeAndValue{}
 	for _, trans := range transPts {
 		if lit, ok := trans.Func.(*ast.FuncLit); ok {
+			// For getting the return type of function for building zero values at if err != nil check body
 			tys[lit] = types.TypeAndValue{}
+		}
+		if trans.kind == transKindToplevelCall {
+			// For getting the return type of try(f(..)) at *ast.ExprStmt
+			tys[trans.call] = types.TypeAndValue{}
 		}
 	}
 
@@ -497,6 +501,14 @@ func (nci *nilCheckInsertion) genErrIdent() *ast.Ident {
 	return ast.NewIdent(fmt.Sprintf("_err%d", id))
 }
 
+func (nci *nilCheckInsertion) typeInfoFor(node ast.Expr) types.Type {
+	t, ok := nci.typeInfo.Types[node]
+	if !ok {
+		panic("Type information is not collected for AST node at " + nci.nodePos(node).String())
+	}
+	return t.Type
+}
+
 func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.FuncType, error) {
 	if decl, ok := node.(*ast.FuncDecl); ok {
 		obj, ok := nci.typeInfo.Defs[decl.Name]
@@ -509,7 +521,7 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 	}
 
 	lit := node.(*ast.FuncLit)
-	ty := nci.typeInfo.Types[lit].Type.(*types.Signature)
+	ty := nci.typeInfoFor(lit).(*types.Signature)
 	log("Function type of func literal at", nci.nodePos(lit), "->", ty)
 	return ty, lit.Type, nil
 }
@@ -632,20 +644,6 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 	return nil
 }
 
-func (nci *nilCheckInsertion) insertIfNilChkExprAt(index int, call *ast.CallExpr, fun ast.Node) error {
-	log("Inserting if err := $call; err != nil { ... } at index", index, "of block at", nci.nodePos(nci.blk))
-	nci.removeStmtAt(index)
-
-	errIdent := ast.NewIdent("err")
-	assign := &ast.AssignStmt{
-		Lhs: []ast.Expr{errIdent},
-		Tok: token.DEFINE,
-		Rhs: []ast.Expr{call},
-	}
-
-	return nci.insertIfNilChkStmtAfter(index, errIdent, assign, fun)
-}
-
 func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) (err error) {
 	// From:
 	//   var $retvals, _ = f(...)
@@ -720,7 +718,38 @@ func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 	//     return $zerovals, err
 	//   }
 	log(hi("Start toplevel try()"), "translation")
-	err = nci.insertIfNilChkExprAt(trans.blockIndex, trans.call, trans.Func)
+
+	// Remove the *ast.ExprStmt at first
+	nci.removeStmtAt(trans.blockIndex)
+
+	// Get the returned type of function call in try() invocation
+	ty := nci.typeInfoFor(trans.call)
+
+	// numIgnores is a number of '_' in LHS of if _, ..., err := ...
+	numIgnores := 0
+	if tpl, ok := ty.(*types.Tuple); ok {
+		numIgnores = tpl.Len() - 1 // - 1 means omitting last 'error' type
+	}
+
+	log("Insert `if $ignores, err := ...; err != nil` check for", trans.kind, "with", numIgnores, "'_' var at", nci.nodePos(trans.call))
+
+	lhs := make([]ast.Expr, 0, numIgnores+1) // + 1 means the last 'error' variable
+	for i := 0; i < numIgnores; i++ {
+		lhs = append(lhs, ast.NewIdent("_"))
+	}
+	errIdent := ast.NewIdent("err")
+	lhs = append(lhs, errIdent)
+
+	// Create err := ...
+	assign := &ast.AssignStmt{
+		Lhs: lhs,
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{trans.call},
+	}
+
+	// Insert if err := ...; err != nil { ... }
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, assign, trans.Func)
+
 	log(hi("End toplevel try()"), "translation", err)
 	return
 }
@@ -802,7 +831,6 @@ func Translate(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
 	}
 
 	log(hi("Type check"), "after phase-1", hi("start: "+pkgName))
-	// TODO: Check types for files which only require translations (contain one or more `try()` calls)
 	files := make([]*ast.File, 0, len(pkg.Files))
 	for _, f := range pkg.Files {
 		files = append(files, f)
