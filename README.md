@@ -65,6 +65,12 @@ In following subsections, `$zerovals` is expanded to zero-values of return value
 For example, when `try()` is used in `func () (int, error)`, `$zerovals` will be `0`. When it is used
 in `func () (*SomeStruct, SomeInterface, SomeStruct, error)`, `$zerovals` will be `nil, nil, SomeStruct{}`.
 
+Implementation:
+- [x] Definition statement
+- [x] Assignment statement
+- [x] Call statement
+- [ ] Call Expression
+
 ### Definition statement
 
 ```
@@ -121,36 +127,40 @@ if $underscores, err := $CallExpr; err != nil {
 calling `func() (int, error)`, it is expanded to `_`. When calling `func() (A, B, error)` in `try()`,
 it is expanded to `_, _`. When calling `func() error` in `try()`, it is expanded to an empty.
 
-### Expression
+### Call Expression
+
+`try()` call except for toplevel in block
 
 ```
-try($CallExpr)
+1 + try($CallExpr)
 ```
 
 Expanded to:
 
 ```
-if err := $CallExpr; err != nil
+$tmp, err := $CallExpr
 if err != nil {
     return $zerovals, err
 }
+1 + $tmp
 ```
 
-This should be nested. For example,
+This should allow nest. For example,
 
 ```
-x := try(Foo(try($CallExpr), arg))
+1 + try(Foo(try($CallExpr), arg))
 ```
 
 ```
-tmp, err := $CallExpr
+$tmp1, err := $CallExpr
 if err != nil {
     return $zerovals, err
 }
-x, err := Foo(tmp, arg)
+$tmp2, err := Foo($tmp1, arg)
 if err != nil {
     return $zerovals, err
 }
+1 + $tmp2
 ```
 
 The order of evaluation must be preserved. For example, when `try()` is used in a slice literal element,
