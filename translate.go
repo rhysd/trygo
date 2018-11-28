@@ -457,12 +457,9 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 		var b strings.Builder
 		b.WriteString(hi("Types for identifiers: "))
 		for ident, obj := range info.Defs {
-			b.WriteString(ident.Name)
-			b.WriteRune(':')
-			if obj == nil {
-				b.WriteString("nil")
-			} else {
-				b.WriteString(obj.String())
+			b.WriteString(hi(ident.Name))
+			if obj != nil {
+				b.WriteString(":'" + obj.String() + "'")
 			}
 			b.WriteString(", ")
 		}
@@ -501,23 +498,27 @@ func (nci *nilCheckInsertion) genErrIdent() *ast.Ident {
 }
 
 func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.FuncType, error) {
-	// TODO: Add logs
 	if decl, ok := node.(*ast.FuncDecl); ok {
 		obj, ok := nci.typeInfo.Defs[decl.Name]
 		if !ok {
 			return nil, nil, errors.Errorf("Type cannot be resolved: Function declaration '%s' at %s", decl.Name.Name, nci.nodePos(decl))
 		}
-		return obj.Type().(*types.Signature), decl.Type, nil
+		ty := obj.Type().(*types.Signature)
+		log("Function type of func", decl.Name.Name, "->", ty)
+		return ty, decl.Type, nil
 	}
 
 	lit := node.(*ast.FuncLit)
-	return nci.typeInfo.Types[lit].Type.(*types.Signature), lit.Type, nil
+	ty := nci.typeInfo.Types[lit].Type.(*types.Signature)
+	log("Function type of func literal at", nci.nodePos(lit), "->", ty)
+	return ty, lit.Type, nil
 }
 
 // insertStmts inserts given statements *before* given index position of current block. If previous
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtsAt(idx int, stmts []ast.Stmt) {
+	log("Insert", len(stmts), "statements to block at", nci.nodePos(nci.blk))
 	prev := nci.blk.List
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx:]
@@ -527,7 +528,6 @@ func (nci *nilCheckInsertion) insertStmtsAt(idx int, stmts []ast.Stmt) {
 	ls = append(ls, r...)
 	nci.blk.List = ls
 	nci.offset += len(stmts)
-	log(hi(len(stmts)), "statements inserted to block at", nci.nodePos(nci.blk))
 }
 
 func (nci *nilCheckInsertion) removeStmtAt(idx int) {
@@ -541,7 +541,7 @@ func (nci *nilCheckInsertion) removeStmtAt(idx int) {
 
 func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, node ast.Expr) (expr ast.Expr) {
 	tyStr := ty.String()
-	log("TYPE: ", hi(tyStr))
+	log("Zero value will be calculated for", hi(tyStr))
 	switch ty := ty.(type) {
 	case *types.Basic:
 		switch ty.Kind() {
@@ -567,11 +567,22 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, node ast.Expr) (expr as
 	case *types.Array, *types.Slice, *types.Pointer, *types.Signature, *types.Interface, *types.Map, *types.Chan:
 		expr = ast.NewIdent("nil")
 	case *types.Struct:
+		// To create CompositeLit for zero value of immediate struct, we reuse the AST node from return type of
+		// function declaration because reconstruct immediate struct type AST node from *types.Struct needs bunch
+		// of code for constructing ast.Expr from types.Type generally.
+		// Note that position of AST node is not correct.
 		expr = &ast.CompositeLit{Type: node}
+		log("AST type node at", nci.nodePos(node), "is reused to generate zero value of *types.Struct")
 	case *types.Named:
 		u := ty.Underlying()
 		if _, ok := u.(*types.Struct); ok {
+			// When the underlying type is struct, CompositeLit should be used for zero value. To create it, we reuse
+			// the AST node from return type of function declaration because it may contain package name like pkg.S.
+			// There is no API to get package(pkg) and name(S) separately from types.Named. We need to parse string
+			// representation. Reusing the AST node is better than parsing.
+			// Note that position of AST node is not correct.
 			expr = &ast.CompositeLit{Type: node}
+			log("AST type node at", nci.nodePos(node), "is reused to generate zero value of *types.Named")
 			break
 		}
 		expr = nci.zeroValueOf(u, node)
@@ -586,8 +597,6 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, node ast.Expr) (expr as
 }
 
 func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.Ident, init ast.Stmt, fun ast.Node) error {
-	// TODO: Add log
-
 	funcTy, funcTyNode, err := nci.funcTypeOf(fun)
 	if err != nil {
 		return err
@@ -637,7 +646,7 @@ func (nci *nilCheckInsertion) insertIfNilChkExprAt(index int, call *ast.CallExpr
 	return nci.insertIfNilChkStmtAfter(index, errIdent, assign, fun)
 }
 
-func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) error {
+func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) (err error) {
 	// From:
 	//   var $retvals, _ = f(...)
 	// To:
@@ -646,11 +655,14 @@ func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPo
 	//     return $zerovals, err
 	//   }
 	errIdent := nci.genErrIdent()
+	log(hi("Start value spec (var =)"), "translation", errIdent.Name)
 	node.Names[len(node.Names)-1] = errIdent
-	return nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	log(hi("End value spec (var =)"), "translation", errIdent.Name, err)
+	return
 }
 
-func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoint) error {
+func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoint) (err error) {
 	// From:
 	//   $retvals, _ := f(...)
 	// To:
@@ -659,10 +671,12 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	//     return $zerovals, err
 	//   }
 	if node.Tok == token.DEFINE {
-		log("Define statement(:=) is translated")
 		errIdent := nci.genErrIdent()
+		log(hi("Start define statement(:=)"), "translation", errIdent.Name)
 		node.Lhs[len(node.Lhs)-1] = errIdent
-		return nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+		err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+		log(hi("End define statement(:=)"), "translation", errIdent.Name, err)
+		return
 	}
 
 	// From:
@@ -675,7 +689,7 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	//   }
 	// Tok is token.EQ
 	errIdent := nci.genErrIdent()
-	log("Assign statement(=) is translated", hi(errIdent.Name))
+	log(hi("Start assign statement(=)"), "translation", errIdent.Name)
 	decl := &ast.DeclStmt{
 		Decl: &ast.GenDecl{
 			Tok: token.VAR,
@@ -693,17 +707,22 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	nci.insertStmtsAt(trans.blockIndex, []ast.Stmt{decl})
 
 	node.Lhs[len(node.Lhs)-1] = errIdent
-	return nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.Func)
+	log(hi("End assign statement(=)"), "translation", errIdent.Name, err)
+	return
 }
 
-func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) error {
+func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 	// From:
 	//   f(...)
 	// To:
 	//   if $ignores, err := f(...); err != nil {
 	//     return $zerovals, err
 	//   }
-	return nci.insertIfNilChkExprAt(trans.blockIndex, trans.call, trans.Func)
+	log(hi("Start toplevel try()"), "translation")
+	err = nci.insertIfNilChkExprAt(trans.blockIndex, trans.call, trans.Func)
+	log(hi("End toplevel try()"), "translation", err)
+	return
 }
 
 func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {

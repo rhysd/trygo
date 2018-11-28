@@ -23,7 +23,7 @@ func InitLog(enabled bool) {
 
 func log(v ...interface{}) {
 	if logEnabled {
-		stdlog.Output(3, fmt.Sprintln(v...))
+		stdlog.Output(2, fmt.Sprintln(v...))
 	}
 }
 
