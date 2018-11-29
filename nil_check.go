@@ -30,6 +30,13 @@ func (nci *nilCheckInsertion) nodePos(node ast.Node) token.Position {
 	return nci.fileset.Position(node.Pos())
 }
 
+func (nci *nilCheckInsertion) logPos(node ast.Node) string {
+	if !logEnabled {
+		return ""
+	}
+	return relpath(nci.nodePos(node).String())
+}
+
 func (nci *nilCheckInsertion) genIdent(pos token.Pos) *ast.Ident {
 	id := nci.varID
 	nci.varID++
@@ -63,7 +70,7 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 
 	lit := node.(*ast.FuncLit)
 	ty := nci.typeInfoFor(lit).(*types.Signature)
-	log("Function type of func literal at", nci.nodePos(lit), "->", ty)
+	log("Function type of func literal at", nci.logPos(lit), "->", ty)
 	return ty, lit.Type, nil
 }
 
@@ -71,7 +78,7 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
-	logf("Insert %T statements to block at %s", stmt, nci.nodePos(nci.blk))
+	logf("Insert %T statements to block at %s", stmt, nci.logPos(nci.blk))
 	prev := nci.blk.List
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx:]
@@ -89,7 +96,7 @@ func (nci *nilCheckInsertion) removeStmtAt(idx int) {
 	l, r := prev[:idx], prev[idx+1:]
 	nci.blk.List = append(l, r...)
 	nci.offset--
-	log(hi(idx+1, "th statement was removed from block at", nci.nodePos(nci.blk)))
+	log(hi(idx+1, "th statement was removed from block at", nci.logPos(nci.blk)))
 }
 
 func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos token.Pos) (expr ast.Expr) {
@@ -145,7 +152,7 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 		// of code for constructing ast.Expr from types.Type generally.
 		// Note that position of AST node is not correct.
 		expr = &ast.CompositeLit{Type: typeNode}
-		log("AST type node at", nci.nodePos(typeNode), "is reused to generate zero value of *types.Struct")
+		log("AST type node at", nci.logPos(typeNode), "is reused to generate zero value of *types.Struct")
 	case *types.Named:
 		u := ty.Underlying()
 		if _, ok := u.(*types.Struct); ok {
@@ -155,7 +162,7 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 			// representation. Reusing the AST node is better than parsing.
 			// Note that position of AST node is not correct.
 			expr = &ast.CompositeLit{Type: typeNode}
-			log("AST type node at", nci.nodePos(typeNode), "is reused to generate zero value of *types.Named")
+			log("AST type node at", nci.logPos(typeNode), "is reused to generate zero value of *types.Named")
 			break
 		}
 		expr = nci.zeroValueOf(u, typeNode, pos)
@@ -206,7 +213,7 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 	}
 
 	nci.insertStmtAt(index+1, stmt)
-	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.nodePos(nci.blk))
+	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.logPos(nci.blk))
 	return nil
 }
 
@@ -299,7 +306,7 @@ func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 		numIgnores = tpl.Len() - 1 // - 1 means omitting last 'error' type
 	}
 
-	log("Insert `if $ignores, err := ...; err != nil` check for", trans.kind, "with", numIgnores, "'_' var at", nci.nodePos(trans.call))
+	log("Insert `if $ignores, err := ...; err != nil` check for", trans.kind, "with", numIgnores, "'_' var at", nci.logPos(trans.call))
 
 	pos := trans.pos
 	lhs := make([]ast.Expr, 0, numIgnores+1) // + 1 means the last 'error' variable
@@ -325,8 +332,7 @@ func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 }
 
 func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
-	pos := nci.fileset.Position(trans.pos)
-	log(hi("Insert if err != nil check for "+trans.kind.String()), "at", pos)
+	log(hi("Insert if err != nil check for "+trans.kind.String()), "at", nci.logPos(trans.node))
 
 	switch trans.kind {
 	case transKindValueSpec:
@@ -347,7 +353,7 @@ func (nci *nilCheckInsertion) block(b *blockTree) error {
 	nci.offset = 0
 	nci.varID = 0
 
-	pos := nci.nodePos(b.ast)
+	pos := nci.logPos(b.ast)
 	log("Start nil check insertion for block at", pos)
 	for _, trans := range b.transPoints {
 		if err := nci.insertNilCheck(trans); err != nil {

@@ -88,10 +88,6 @@ func TestGenerateOK(t *testing.T) {
 }
 
 func TestGenerateGoGenerateOK(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer os.Chdir(cwd)
 
 	base := filepath.FromSlash("testdata/gen/ok/simple/")

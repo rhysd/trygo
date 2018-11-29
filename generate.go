@@ -24,10 +24,6 @@ func init() {
 	}
 }
 
-func relPath(absPath string) string {
-	return "." + strings.TrimPrefix(absPath, cwd)
-}
-
 // Gen represents a generator of trygo
 type Gen struct {
 	// OutDir is a directory path to output directory. This value must be an absolute path
@@ -118,7 +114,7 @@ func (gen *Gen) writeGo(out io.Writer, file *ast.File, fset *token.FileSet) erro
 
 func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) error {
 	outpath := gen.outFilePath(path)
-	log("Write translated file:", hi(relPath(path)), "->", hi(relPath(outpath)))
+	log("Write translated file:", hi(relpath(path)), "->", hi(relpath(outpath)))
 
 	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
 		return err

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	stdlog "log"
+	"path/filepath"
+	"strings"
 )
 
 var (
@@ -58,4 +60,18 @@ func dbg(v ...interface{}) string {
 		return ""
 	}
 	return green.Sprint(v...)
+}
+
+func relpath(abspath string) string {
+	if !logEnabled {
+		return abspath
+	}
+	if !filepath.IsAbs(abspath) {
+		return abspath
+	}
+	rel := strings.TrimPrefix(abspath, cwd)
+	if len(abspath) <= len(rel) {
+		return abspath
+	}
+	return "." + rel
 }

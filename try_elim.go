@@ -63,6 +63,13 @@ func (tce *tryCallElimination) nodePos(node ast.Node) token.Position {
 	return tce.fileset.Position(node.Pos())
 }
 
+func (tce *tryCallElimination) logPos(node ast.Node) string {
+	if !logEnabled {
+		return ""
+	}
+	return relpath(tce.nodePos(node).String())
+}
+
 func (tce *tryCallElimination) errAt(node ast.Node, msg string) {
 	tce.err = errors.Errorf("%s: %v: Error: %s", tce.nodePos(node), tce.pkg.Name, msg)
 	log(ftl(tce.err))
@@ -140,7 +147,7 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 	}
 
 	pos := tryCall.Pos()
-	log(hi("Eliminate try() call"), "for kind", kind, "at", tce.nodePos(tryCall))
+	log(hi("Eliminate try() call"), "for kind", kind, "at", tce.logPos(tryCall))
 
 	// Squash try() call with inner call: try(f(...)) -> f(...)
 	*tryCall = *innerCall
@@ -164,7 +171,7 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 }
 
 func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
-	pos := tce.nodePos(spec)
+	pos := tce.logPos(spec)
 	log("Value spec at", pos)
 
 	if len(spec.Values) != 1 {
@@ -192,7 +199,7 @@ func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
 }
 
 func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
-	pos := tce.fileset.Position(assign.Pos())
+	pos := tce.logPos(assign)
 	log("Assignment at", pos)
 
 	if len(assign.Rhs) != 1 {
@@ -225,18 +232,19 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 }
 
 func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
-	pos := tce.nodePos(stmt)
+	pos := tce.logPos(stmt)
 	log("Assignment at", pos)
 
 	if ok := tce.eliminateTryCall(transKindToplevelCall, stmt, stmt.X); !ok {
+		// Error
 		return
 	}
 
-	log("Assignment at", pos, "added new translation point")
+	log("New translation point for toplevel try() call at", pos)
 }
 
 func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
-	pos := tce.nodePos(block)
+	pos := tce.logPos(block)
 	log("Block statement start", pos)
 
 	parent := tce.currentBlk
