@@ -104,7 +104,7 @@ func unifyTypeErrors(phase string, errs []error) error {
 func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files []*ast.File) (*types.Info, *types.Package, error) {
 	errs := []error{}
 	cfg := &types.Config{
-		Importer:    importer.Default(),
+		Importer:    importer.For("source", nil),
 		FakeImportC: true,
 		Error: func(err error) {
 			log(ftl(err))
@@ -156,7 +156,7 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 func verifyTranslation(pkgDir string, fset *token.FileSet, files []*ast.File) {
 	errs := []error{}
 	cfg := &types.Config{
-		Importer:    importer.Default(),
+		Importer:    importer.For("source", nil),
 		FakeImportC: true,
 		Error: func(err error) {
 			log(ftl(err))
