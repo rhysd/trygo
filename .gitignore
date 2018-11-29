@@ -1,2 +1,4 @@
 /trygo
 /testdata/**/HAVE/
+/cover.out
+/out
