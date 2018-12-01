@@ -32,7 +32,7 @@ func (gen *Gen) packageDirsForGoGenerate() ([]string, error) {
 	if _, ok := os.LookupEnv("GOFILE"); !ok {
 		return nil, errors.New("`trygo` was not run from `go generate` and no path is given. Nothing to generate")
 	}
-	log("Collect package dir for `go generate`")
+	log("Collect package dir for `go generate`:", cwd)
 	return []string{cwd}, nil
 }
 
@@ -74,6 +74,9 @@ func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
 	return dirs, nil
 }
 
+// PackageDirs collects package directories under given paths. If paths argument is empty, it collects
+// a package directory as `go generate` runs trygo. If no Go package is found or pacakge directory
+// cannot be read, this function returns an error.
 func (gen *Gen) PackageDirs(paths []string) ([]string, error) {
 	if len(paths) == 0 {
 		return gen.packageDirsForGoGenerate()
@@ -98,6 +101,9 @@ func (gen *Gen) outDirPath(inpath string) string {
 	return filepath.Join(gen.OutDir, part)
 }
 
+// TranslatePackages translates all packages specified with directory paths. It returns slice of Package
+// which represent translated packages. When parsing Go(TryGo) sources failed or the translations failed,
+// this function returns an error.
 func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 	log("Parse package directories:", pkgDirs)
 
@@ -126,6 +132,13 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 	return parsed, nil
 }
 
+// GeneratePackages translates all TryGo packages specified with directory paths and generates translated
+// Go files with the same directory structures under output directory.
+// When 'verify' argument is set to true, translated packages are verified with type checks after
+// generating the Go files. When the verification reports some errors, generated Go files would be broken.
+// This verification is mainly used for debugging.
+// When parsing Go(TryGo) sources failed or the translations failed, translated Go file could not
+// be written, this function returns an error.
 func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 	pkgs, err := gen.TranslatePackages(pkgDirs)
 	if err != nil {
@@ -151,8 +164,14 @@ func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 	return nil
 }
 
-// When verify is set to true, Gen verifies translated packages with type check again. This flag
-// is mainly used for debugging
+// Generate collects all TryGo packages under given paths, translates all the TryGo packages specified
+// with directory paths and generates translated Go files with the same directory structures under
+// output directory.
+// When 'verify' argument is set to true, translated packages are verified with type checks after
+// generating the Go files. When the verification reports some errors, generated Go files would be broken.
+// This verification is mainly used for debugging.
+// When collecting TryGo packages from paths failed, packages parsing TryGo sources failed or the translations
+// failed, translated Go file could not be written, this function returns an error.
 func (gen *Gen) Generate(paths []string, verify bool) error {
 	log("Create outdir:", hi(gen.OutDir))
 	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
@@ -168,6 +187,8 @@ func (gen *Gen) Generate(paths []string, verify bool) error {
 	return gen.GeneratePackages(dirs, verify)
 }
 
+// NewGen creates a new Gen instance with given output directory. All translated packages are generated
+// under the output directory. When the output directory does not exist, it is automatically created.
 func NewGen(outDir string) (*Gen, error) {
 	if outDir == "" {
 		return nil, errors.New("Output directory must be given")

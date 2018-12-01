@@ -103,3 +103,24 @@ func TestLogRelpath(t *testing.T) {
 		}
 	}
 }
+
+func TestLogNoOutputOnDisabled(t *testing.T) {
+	saved := logEnabled
+	defer func() {
+		logEnabled = saved
+		stdlog.SetOutput(os.Stderr)
+	}()
+	InitLog(false)
+
+	var buf bytes.Buffer
+	stdlog.SetOutput(&buf)
+
+	log("hello", hi("world"), ftl("goodbye"))
+	logf("Answer is %d", 42)
+	dbg("This is", "debug", "message")
+
+	stderr := buf.String()
+	if stderr != "" {
+		t.Fatal("Log is output even if logging is disabled:", stderr)
+	}
+}

@@ -9,6 +9,15 @@ import (
 	"reflect"
 )
 
+// Nil check insertion.
+// It completes nil checks of try() calls by inserting AST nodes into statement blocks.
+//
+//   - Insert `if _err$n != nil { return $zerovals, _err$n }`.
+//   - Replace '_' ignoring variables inserted by try() call elimination with _err$n variables.
+//   - Inserts `var _err$n error` for assignments.
+//   - On toplevel try(f()) call expression statement, the function call is replaced with
+//     `if $ignores, err := f(); err != nil { ... }`.
+
 func newIdent(name string, pos token.Pos) *ast.Ident {
 	i := ast.NewIdent(name)
 	i.NamePos = pos

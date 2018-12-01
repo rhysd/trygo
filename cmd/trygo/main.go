@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/fatih/color"
+	"github.com/mattn/go-colorable"
 	"github.com/rhysd/trygo"
 	"os"
 )
@@ -20,7 +22,7 @@ var (
 
 func exit(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "trygo: error: %v\n", err)
+		fmt.Fprintln(colorable.NewColorableStderr(), color.RedString("trygo: error:"), err)
 		os.Exit(111)
 	}
 	os.Exit(0)

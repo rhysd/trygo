@@ -15,6 +15,8 @@ var (
 	green      = color.New(color.FgGreen)
 )
 
+// InitLog initializes logging instance. When true is given as enabled, all logs are output to stderr
+// while code generations.
 func InitLog(enabled bool) {
 	logEnabled = enabled
 	if !enabled {

@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// Import statements which imports translated packages are still specifying wrong path.
-// Considering translation, import paths must be fixed to ensure not to break compilation.
+// Import statements which import translated packages are still looking wrong paths.
+// Considering translation, the import paths must be fixed not to break compilation.
 
 type importsFixer struct {
 	transMap  map[string]string
@@ -23,20 +23,26 @@ func (fixer *importsFixer) resolveImportPath(path string, pkgDir string) string 
 	}
 	p, err := fixer.ctx.Import(path, pkgDir, build.FindOnly)
 	if err != nil {
+		// Panic due to internal fatal error. Type check was already passed so import paths should
+		// be resolved correctly.
 		panic("Cannot resolve import path '" + path + "': " + err.Error())
 	}
 	fixer.pathToDir[path] = p.Dir
+	log("Import path", hi(path), "was resolved to", hi(p.Dir))
 	return p.Dir
 }
 
 func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) {
+	log("Looking import spec", hi(node.Path.Value))
+
 	path, err := strconv.Unquote(node.Path.Value)
 	if err != nil {
+		// Panic due to internal fatal error. The AST node came from the parse results so literal value
+		// must be correct Go expression.
 		panic("Import path is broken Go string: " + node.Path.Value)
 	}
 
 	srcDir := fixer.resolveImportPath(path, pkgDir)
-	log("Import", hi(path), "was resolved to", hi(srcDir))
 
 	destDir, ok := fixer.transMap[srcDir]
 	if !ok {

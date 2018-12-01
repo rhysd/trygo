@@ -134,8 +134,6 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 		return nil, nil, unifyTypeErrors("type check after phase-1", errs)
 	}
 
-	// TODO: Check $CallExpr as argument of try() returns error as the last return value
-
 	if logEnabled {
 		var b strings.Builder
 		b.WriteString(hi("Types for identifiers: "))
@@ -214,10 +212,15 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 	log(hi("Phase-2"), "if err != nil check insertion", hi("end: "+pkgName))
 
 	log("Translation", hi("end: "+pkgName))
-
 	return nil
 }
 
+// Translate translates all given TryGo packages by modifying given slice of Packages directly. After
+// translation, the given packages are translated to Go packages.
+// Each Package instance's Node and Files fields must be set with the results of an AST and tokens
+// parsed from TryGo source. And Birth must be set correctly as package directory of the TryGo source.
+// When translation failed, it returns an error as soon as possible. Given Package instances may be
+// no longer correct.
 func Translate(pkgs []*Package) error {
 	log("Translate parsed packages:", pkgs)
 	for _, pkg := range pkgs {

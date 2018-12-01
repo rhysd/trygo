@@ -18,10 +18,9 @@ guard :shell do
       sources = "common_test.go #{sources}" if m[0] != 'common_test.go'
       # Assume that https://github.com/rhysd/gotest is installed
       run "gotest #{m[0]} #{sources}"
-      # run "golint #{m[0]}"
     else
       run 'go build ./cmd/trygo'
-      # run "golint #{m[0]}"
+      run "golint #{m[0]}"
     end
   end
 end

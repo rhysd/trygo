@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+// Try call elimination.
+//
+// This pass eliminates all try() calls in source not to make type check fail.
+// All try() call expressions are removed and '_' ignoring variable is inserted
+// to declarations to receive error values.
+//
+// e.g.
+//   x := try(f())  ->  x, _ := f()
+//   x = try(f())   ->  x, _ = f()
+//   try(f())       ->  f()
+
 type nodeStack []ast.Node
 
 func (ns nodeStack) push(n ast.Node) nodeStack {
