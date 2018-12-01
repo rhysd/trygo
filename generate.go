@@ -24,6 +24,51 @@ func init() {
 	}
 }
 
+type Package struct {
+	Files *token.FileSet
+	Node  *ast.Package
+	Path  string
+	Birth string
+}
+
+func (pkg *Package) writeGoFileTo(out io.Writer, file *ast.File) error {
+	w := bufio.NewWriter(out)
+	if err := format.Node(w, pkg.Files, file); err != nil {
+		var buf bytes.Buffer
+		ast.Fprint(&buf, pkg.Files, file, nil)
+		return errors.Wrapf(err, "Broken Go source: %s\n%s", file.Name.Name+".go", buf.String())
+	}
+	return errors.Wrap(w.Flush(), "Cannot write file")
+}
+
+func (pkg *Package) writeGoFile(fname string, file *ast.File) error {
+	outpath := filepath.Join(pkg.Path, fname)
+	log("Write translated Go file to", hi(relpath(fname)))
+
+	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
+		return err
+	}
+
+	f, err := os.Create(outpath)
+	if err != nil {
+		return errors.Wrapf(err, "Cannot open output file %q", outpath)
+	}
+	defer f.Close()
+
+	return pkg.writeGoFileTo(f, file)
+}
+
+func (pkg *Package) Write() error {
+	log("Write translated package:", hi(pkg.Birth), "->", hi(pkg.Path))
+	for path, node := range pkg.Node.Files {
+		fname := filepath.Base(path)
+		if err := pkg.writeGoFile(fname, node); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Gen represents a generator of trygo
 type Gen struct {
 	// OutDir is a directory path to output directory. This value must be an absolute path
@@ -85,7 +130,7 @@ func (gen *Gen) PackageDirs(paths []string) ([]string, error) {
 	return gen.packageDirsFromPaths(paths)
 }
 
-func (gen *Gen) outFilePath(inpath string) string {
+func (gen *Gen) outDirPath(inpath string) string {
 	// outDir: /repo/out
 	// package: /repo/foo/bar
 
@@ -98,81 +143,54 @@ func (gen *Gen) outFilePath(inpath string) string {
 	// part: /foo/bar
 	part := strings.TrimPrefix(inpath, d)
 
-	// return: repo/out/foo/bar
+	// return: /repo/out/foo/bar
 	return filepath.Join(gen.OutDir, part)
 }
 
-func (gen *Gen) writeGo(out io.Writer, file *ast.File, fset *token.FileSet) error {
-	w := bufio.NewWriter(out)
-	if err := format.Node(w, fset, file); err != nil {
-		var buf bytes.Buffer
-		ast.Fprint(&buf, fset, file, nil)
-		return errors.Wrapf(err, "Broken Go source: %s\n%s", file.Name.Name+".go", buf.String())
-	}
-	return w.Flush()
-}
-
-func (gen *Gen) writeGoFile(path string, file *ast.File, fset *token.FileSet) error {
-	outpath := gen.outFilePath(path)
-	log("Write translated file:", hi(relpath(path)), "->", hi(relpath(outpath)))
-
-	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
-		return err
-	}
-
-	outfile, err := os.Create(outpath)
-	if err != nil {
-		return errors.Wrapf(err, "Cannot open output file %q", outpath)
-	}
-	defer outfile.Close()
-
-	if err := gen.writeGo(outfile, file, fset); err != nil {
-		return err
-	}
-
-	fmt.Fprintln(gen.Writer, outpath)
-	return nil
-}
-
-func (gen *Gen) TranslatePackages(pkgDirs []string) (map[string]*ast.Package, *token.FileSet, error) {
+func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 	log("Parse package directories:", pkgDirs)
 
-	parsed := make(map[string]*ast.Package, len(pkgDirs))
+	parsed := make([]*Package, 0, len(pkgDirs))
 	fset := token.NewFileSet()
 	for _, dir := range pkgDirs {
 		pkgs, err := parser.ParseDir(fset, dir, nil, 0)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		for dir, pkg := range pkgs {
-			parsed[dir] = pkg
+		for name, pkg := range pkgs {
+			log("name:", dbg(name), "dir:", dbg(dir))
+			parsed = append(parsed, &Package{
+				Files: fset,
+				Node:  pkg,
+				Path:  gen.outDirPath(dir),
+				Birth: dir,
+			})
 		}
 	}
 
 	// Translate all parsed ASTs per package
 	log("Translate parsed packages:", parsed)
-	for dir, pkg := range parsed {
-		if err := Translate(dir, pkg, fset); err != nil {
-			return nil, nil, err
+	for _, pkg := range parsed {
+		if err := Translate(pkg.Birth, pkg.Node, pkg.Files); err != nil {
+			return nil, err
 		}
 	}
 
-	return parsed, fset, nil
+	return parsed, nil
 }
 
 func (gen *Gen) GeneratePackages(pkgDirs []string) error {
-	pkgs, fset, err := gen.TranslatePackages(pkgDirs)
+	pkgs, err := gen.TranslatePackages(pkgDirs)
 	if err != nil {
 		return err
 	}
 
-	log("Write translated packages to files:", pkgs)
+	log("Translation done:", len(pkgs), "packages")
 	for _, pkg := range pkgs {
-		for path, ast := range pkg.Files {
-			if err := gen.writeGoFile(path, ast, fset); err != nil {
-				return err
-			}
+		if err := pkg.Write(); err != nil {
+			return err
 		}
+		fmt.Fprintln(gen.Writer, pkg.Path)
 	}
 
 	return nil
