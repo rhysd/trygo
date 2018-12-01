@@ -153,23 +153,6 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 	return info, pkg, nil
 }
 
-func verifyTranslation(pkgDir string, fset *token.FileSet, files []*ast.File) {
-	errs := []error{}
-	cfg := &types.Config{
-		Importer:    importer.For("source", nil),
-		FakeImportC: true,
-		Error: func(err error) {
-			log(ftl(err))
-			errs = append(errs, err)
-		},
-	}
-	cfg.Check(pkgDir, fset, files, &types.Info{})
-
-	if len(errs) > 0 {
-		panic(unifyTypeErrors("yype check verification after phase-2", errs).Error())
-	}
-}
-
 // translatePackage translates given package from TryGo to Go. Given AST is directly modified. When error
 // occurs, it returns an error and the AST may be incompletely modified.
 func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
@@ -232,7 +215,6 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 
 	log("Translation", hi("end: "+pkgName))
 
-	verifyTranslation(pkgDir, fs, files)
 	return nil
 }
 

@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// Import statements which imports translated packages are still specifying wrong path.
+// Considering translation, import paths must be fixed to ensure not to break compilation.
+
 type importsFixer struct {
 	transMap  map[string]string
 	ctx       build.Context
@@ -40,14 +43,14 @@ func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) {
 		return
 	}
 
-	// path: trygo/pkg
-	// srcDir: /path/to/trygo/pkg
-	// destDir: /path/to/outdir/pkg
+	// path: trygo/some/pkg
+	// srcDir: /path/to/trygo/some/pkg
+	// destDir: /path/to/outdir/some/pkg
 
 	// prefix: /path/to/
 	prefix := strings.TrimSuffix(srcDir, path)
 
-	// transPath: outdir/pkg
+	// transPath: outdir/some/pkg
 	transPath := strings.TrimPrefix(destDir, prefix)
 
 	// Finally replace import path with translated directory

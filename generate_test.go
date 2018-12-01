@@ -37,7 +37,7 @@ func TestGenerateOK(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := gen.Generate([]string{dir}); err != nil {
+			if err := gen.Generate([]string{dir}, true); err != nil {
 				t.Fatal(err)
 			}
 			if s, err := os.Stat(outDir); err != nil || !s.IsDir() {
@@ -79,8 +79,9 @@ func TestGenerateOK(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, path := range paths {
-				if !strings.Contains(stdout, path) {
-					t.Error(path, "is not contained in stdout:", stdout)
+				want := filepath.Dir(path)
+				if !strings.Contains(stdout, want) {
+					t.Error(want, "is not contained in stdout:", stdout)
 				}
 			}
 		})

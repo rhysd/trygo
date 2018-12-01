@@ -1,7 +1,7 @@
 package b
 
 import (
-	"github.com/rhysd/trygo/testdata/gen/ok/nested/a"
+	"github.com/rhysd/trygo/testdata/gen/ok/HAVE/nested/a"
 	"os"
 )
 

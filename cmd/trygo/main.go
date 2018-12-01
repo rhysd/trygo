@@ -42,7 +42,7 @@ func main() {
 		exit(err)
 	}
 
-	if err := gen.Generate(flag.Args()); err != nil {
+	if err := gen.Generate(flag.Args(), *debug); err != nil {
 		exit(err)
 	}
 }

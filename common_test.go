@@ -6,7 +6,12 @@ import (
 	"testing"
 )
 
-var cwd string
+var (
+	cwd        string
+	onTravisCI bool
+	onAppveyor bool
+	onCI       bool
+)
 
 func init() {
 	var err error
@@ -15,26 +20,18 @@ func init() {
 		panic(err)
 	}
 
+	onTravisCI = os.Getenv("TRAVIS") != ""
+	onAppveyor = os.Getenv("APPVEYOR") != ""
+	onCI = onTravisCI || onAppveyor
+
 	// On CI, enabling log would help failure analysis
-	if onCI() {
+	if onCI {
 		trygo.InitLog(true)
 	}
 }
 
-func onTravis() bool {
-	return os.Getenv("TRAVIS") != ""
-}
-
-func onAppveyor() bool {
-	return os.Getenv("APPVEYOR") != ""
-}
-
-func onCI() bool {
-	return onTravis() || onAppveyor()
-}
-
 func skipOnCI(t *testing.T) {
-	if onCI() {
+	if onCI {
 		t.Skip("because this test case cannot be run on CI")
 	}
 }

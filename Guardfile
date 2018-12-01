@@ -15,9 +15,9 @@ guard :shell do
     when /_test\.go$/
       parent = File.dirname m[0]
       sources = Dir["#{parent}/*.go"].reject{|p| p.end_with? '_test.go' }.uniq.join ' '
-      sources = "#{m[0]} #{sources}" if m[0] != 'common_test.go'
+      sources = "common_test.go #{sources}" if m[0] != 'common_test.go'
       # Assume that https://github.com/rhysd/gotest is installed
-      run "gotest #{sources}"
+      run "gotest #{m[0]} #{sources}"
       # run "golint #{m[0]}"
     else
       run 'go build ./cmd/trygo'

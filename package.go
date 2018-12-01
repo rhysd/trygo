@@ -6,7 +6,9 @@ import (
 	"github.com/pkg/errors"
 	"go/ast"
 	"go/format"
+	"go/importer"
 	"go/token"
+	"go/types"
 	"io"
 	"os"
 	"path/filepath"
@@ -55,5 +57,35 @@ func (pkg *Package) Write() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (pkg *Package) verify() error {
+	log("Verify translated package ", hi(pkg.Node.Name), "at", hi(relpath(pkg.Path)))
+	// Verify translated package by type check
+	errs := []error{}
+
+	cfg := &types.Config{
+		Importer:    importer.For("source", nil),
+		FakeImportC: true,
+		Error: func(err error) {
+			log(ftl(err))
+			errs = append(errs, err)
+		},
+	}
+
+	files := make([]*ast.File, 0, len(pkg.Node.Files))
+	for _, f := range pkg.Node.Files {
+		files = append(files, f)
+	}
+
+	cfg.Check(pkg.Path, pkg.Files, files, &types.Info{})
+	if len(errs) > 0 {
+		return unifyTypeErrors("verification after translation", errs)
+	}
+
+	// TODO: Add more verification for translation
+
+	log("Package verification OK:", hi(pkg.Node.Name))
 	return nil
 }

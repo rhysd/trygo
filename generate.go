@@ -126,13 +126,13 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 	return parsed, nil
 }
 
-func (gen *Gen) GeneratePackages(pkgDirs []string) error {
+func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 	pkgs, err := gen.TranslatePackages(pkgDirs)
 	if err != nil {
 		return err
 	}
-
 	log("Translation done:", len(pkgs), "packages")
+
 	for _, pkg := range pkgs {
 		if err := pkg.Write(); err != nil {
 			return err
@@ -140,11 +140,20 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 		fmt.Fprintln(gen.Writer, pkg.Path)
 	}
 
+	if verify {
+		for _, pkg := range pkgs {
+			if err := pkg.verify(); err != nil {
+				return errors.Wrap(err, "Type error while verification after translation")
+			}
+		}
+	}
+
 	return nil
 }
 
-// Add `verify bool` parameter
-func (gen *Gen) Generate(paths []string) error {
+// When verify is set to true, Gen verifies translated packages with type check again. This flag
+// is mainly used for debugging
+func (gen *Gen) Generate(paths []string, verify bool) error {
 	log("Create outdir:", hi(gen.OutDir))
 	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
 		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
@@ -156,7 +165,7 @@ func (gen *Gen) Generate(paths []string) error {
 	}
 	log("Package directories:", hi(dirs))
 
-	return gen.GeneratePackages(dirs)
+	return gen.GeneratePackages(dirs, verify)
 }
 
 func NewGen(outDir string) (*Gen, error) {
