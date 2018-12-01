@@ -1,12 +1,8 @@
 package trygo
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"github.com/pkg/errors"
-	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"io"
@@ -22,51 +18,6 @@ func init() {
 	if cwd, err = os.Getwd(); err != nil {
 		panic(err)
 	}
-}
-
-type Package struct {
-	Files *token.FileSet
-	Node  *ast.Package
-	Path  string
-	Birth string
-}
-
-func (pkg *Package) writeGoFileTo(out io.Writer, file *ast.File) error {
-	w := bufio.NewWriter(out)
-	if err := format.Node(w, pkg.Files, file); err != nil {
-		var buf bytes.Buffer
-		ast.Fprint(&buf, pkg.Files, file, nil)
-		return errors.Wrapf(err, "Broken Go source: %s\n%s", file.Name.Name+".go", buf.String())
-	}
-	return errors.Wrap(w.Flush(), "Cannot write file")
-}
-
-func (pkg *Package) writeGoFile(fname string, file *ast.File) error {
-	outpath := filepath.Join(pkg.Path, fname)
-	log("Write translated Go file to", hi(relpath(fname)))
-
-	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
-		return err
-	}
-
-	f, err := os.Create(outpath)
-	if err != nil {
-		return errors.Wrapf(err, "Cannot open output file %q", outpath)
-	}
-	defer f.Close()
-
-	return pkg.writeGoFileTo(f, file)
-}
-
-func (pkg *Package) Write() error {
-	log("Write translated package:", hi(pkg.Birth), "->", hi(pkg.Path))
-	for path, node := range pkg.Node.Files {
-		fname := filepath.Base(path)
-		if err := pkg.writeGoFile(fname, node); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Gen represents a generator of trygo
@@ -157,8 +108,7 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 		if err != nil {
 			return nil, err
 		}
-		for name, pkg := range pkgs {
-			log("name:", dbg(name), "dir:", dbg(dir))
+		for _, pkg := range pkgs {
 			parsed = append(parsed, &Package{
 				Files: fset,
 				Node:  pkg,
@@ -169,11 +119,8 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 	}
 
 	// Translate all parsed ASTs per package
-	log("Translate parsed packages:", parsed)
-	for _, pkg := range parsed {
-		if err := Translate(pkg.Birth, pkg.Node, pkg.Files); err != nil {
-			return nil, err
-		}
+	if err := Translate(parsed); err != nil {
+		return nil, err
 	}
 
 	return parsed, nil
@@ -196,6 +143,7 @@ func (gen *Gen) GeneratePackages(pkgDirs []string) error {
 	return nil
 }
 
+// Add `verify bool` parameter
 func (gen *Gen) Generate(paths []string) error {
 	log("Create outdir:", hi(gen.OutDir))
 	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {

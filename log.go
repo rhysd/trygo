@@ -55,11 +55,10 @@ func ftl(v ...interface{}) string {
 
 // dbg is for debugging. This function should not be used usually, but used for temporary highlighting
 // for debugging.
-func dbg(v ...interface{}) string {
-	if !logEnabled {
-		return ""
+func dbg(v ...interface{}) {
+	if logEnabled {
+		stdlog.Output(2, green.Sprintln(v...))
 	}
-	return green.Sprint(v...)
 }
 
 func relpath(abspath string) string {

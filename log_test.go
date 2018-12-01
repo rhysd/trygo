@@ -36,7 +36,7 @@ func TestLogLogOutput(t *testing.T) {
 	var buf bytes.Buffer
 	stdlog.SetOutput(&buf)
 
-	log("hello", hi("yellow"), ftl("red!"), dbg("green~"))
+	log("hello", hi("yellow"), ftl("red!"))
 	logf("Answer: %d", 42)
 
 	stderr := buf.String()
@@ -50,11 +50,28 @@ func TestLogLogOutput(t *testing.T) {
 	if !strings.Contains(stderr, "red!") {
 		t.Fatal("fatal", stderr)
 	}
-	if !strings.Contains(stderr, "green~") {
-		t.Fatal("debug", stderr)
-	}
 	if !strings.Contains(stderr, "Answer: 42") {
 		t.Fatal("formatted", stderr)
+	}
+}
+
+func TestLogDbgOutput(t *testing.T) {
+	saved := logEnabled
+	defer func() {
+		logEnabled = saved
+		stdlog.SetOutput(os.Stderr)
+	}()
+	InitLog(true)
+
+	var buf bytes.Buffer
+	stdlog.SetOutput(&buf)
+
+	dbg("hello", "hi!", "goodbye")
+
+	stderr := buf.String()
+
+	if !strings.Contains(stderr, "hello hi! goodbye") {
+		t.Fatal("Debug log is unexpected:", stderr)
 	}
 }
 

@@ -170,9 +170,9 @@ func verifyTranslation(pkgDir string, fset *token.FileSet, files []*ast.File) {
 	}
 }
 
-// Translate translates given package from TryGo to Go. Given AST is directly modified. When error
+// translatePackage translates given package from TryGo to Go. Given AST is directly modified. When error
 // occurs, it returns an error and the AST may be incompletely modified.
-func Translate(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
+func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
 	pkgName := pkg.Name
 	log("Translation", hi("start: "+pkgName))
 
@@ -233,5 +233,16 @@ func Translate(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
 	log("Translation", hi("end: "+pkgName))
 
 	verifyTranslation(pkgDir, fs, files)
+	return nil
+}
+
+func Translate(pkgs []*Package) error {
+	log("Translate parsed packages:", pkgs)
+	for _, pkg := range pkgs {
+		if err := translatePackage(pkg.Birth, pkg.Node, pkg.Files); err != nil {
+			return err
+		}
+	}
+	fixImports(pkgs)
 	return nil
 }
