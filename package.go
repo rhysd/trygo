@@ -16,10 +16,15 @@ import (
 
 // Package represents tranlated package. It contains tokens and AST of all Go files in the package
 type Package struct {
+	// Files is a token file set to get position information of nodes.
 	Files *token.FileSet
-	Node  *ast.Package
-	Path  string
-	Birth string
+	// Node is an AST package node which was parsed from TryGo code. AST will be directly modified by translations.
+	Node *ast.Package
+	// Path is a package path where this translated package *will* be created.
+	Path string
+	// Birth is a pacakge path where this translated package was translated from.
+	Birth    string
+	modified bool
 }
 
 func (pkg *Package) writeGoFileTo(out io.Writer, file *ast.File) error {
@@ -88,4 +93,22 @@ func (pkg *Package) verify() error {
 
 	log("Package verification OK:", hi(pkg.Node.Name))
 	return nil
+}
+
+// Modified returns the package was modified by translation
+func (pkg *Package) Modified() bool {
+	return pkg.modified
+}
+
+// Should add ParsePackage(pkgDir string, fs *token.FileSet) (*Package, error)?
+
+// NewPackage creates a new Package instance containing additional information to AST node
+func NewPackage(node *ast.Package, srcPath, destPath string, fs *token.FileSet) *Package {
+	return &Package{
+		Files:    fs,
+		Node:     node,
+		Path:     destPath,
+		Birth:    srcPath,
+		modified: false,
+	}
 }

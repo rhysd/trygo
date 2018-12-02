@@ -32,7 +32,7 @@ func (fixer *importsFixer) resolveImportPath(path string, pkgDir string) string 
 	return p.Dir
 }
 
-func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) {
+func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) bool {
 	log("Looking import spec", hi(node.Path.Value))
 
 	path, err := strconv.Unquote(node.Path.Value)
@@ -46,7 +46,7 @@ func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) {
 
 	destDir, ok := fixer.transMap[srcDir]
 	if !ok {
-		return
+		return false
 	}
 
 	// path: trygo/some/pkg
@@ -64,6 +64,7 @@ func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) {
 	node.Path.Value = strconv.Quote(transPath)
 	log("Fix imoprt path:", hi(prev), "->", hi(node.Path.Value))
 	fixer.count++
+	return true
 }
 
 func (fixer *importsFixer) fixPackage(pkg *Package) {
@@ -71,7 +72,9 @@ func (fixer *importsFixer) fixPackage(pkg *Package) {
 	for fpath, file := range pkg.Node.Files {
 		log("Fix imports in file:", hi(fpath))
 		for _, node := range file.Imports {
-			fixer.fixImport(node, pkg.Path)
+			if fixer.fixImport(node, pkg.Path) {
+				pkg.modified = true
+			}
 		}
 	}
 }

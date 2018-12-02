@@ -115,12 +115,7 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 			return nil, err
 		}
 		for _, pkg := range pkgs {
-			parsed = append(parsed, &Package{
-				Files: fset,
-				Node:  pkg,
-				Path:  gen.outDirPath(dir),
-				Birth: dir,
-			})
+			parsed = append(parsed, NewPackage(pkg, dir, gen.outDirPath(dir), fset))
 		}
 	}
 
@@ -155,6 +150,10 @@ func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 
 	if verify {
 		for _, pkg := range pkgs {
+			if !pkg.modified {
+				log("Skip verification of unmodified package", pkg.Node.Name, "translated from", relpath(pkg.Birth))
+				continue
+			}
 			if err := pkg.verify(); err != nil {
 				return errors.Wrap(err, "Type error while verification after translation")
 			}

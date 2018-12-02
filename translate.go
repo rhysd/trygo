@@ -153,18 +153,18 @@ func typeCheck(transPts []*transPoint, pkgDir string, fset *token.FileSet, files
 
 // translatePackage translates given package from TryGo to Go. Given AST is directly modified. When error
 // occurs, it returns an error and the AST may be incompletely modified.
-func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error {
-	pkgName := pkg.Name
+func translatePackage(pkg *Package) error {
+	pkgName := pkg.Node.Name
 	log("Translation", hi("start: "+pkgName))
 
 	tce := &tryCallElimination{
-		pkg:     pkg,
-		fileset: fs,
+		pkg:     pkg.Node,
+		fileset: pkg.Files,
 	}
 
 	log(hi("Phase-1"), "try() call elimination", hi("start: "+pkgName))
 	// Traverse AST for phase-1
-	ast.Walk(tce, pkg)
+	ast.Walk(tce, pkg.Node)
 	if tce.err != nil {
 		return tce.err
 	}
@@ -177,8 +177,8 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 	}
 
 	log(hi("Type check"), "after phase-1", hi("start: "+pkgName))
-	files := make([]*ast.File, 0, len(pkg.Files))
-	for _, f := range pkg.Files {
+	files := make([]*ast.File, 0, len(pkg.Node.Files))
+	for _, f := range pkg.Node.Files {
 		files = append(files, f)
 	}
 
@@ -187,7 +187,7 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 		transPoints = append(transPoints, root.collectTransPoints()...)
 	}
 
-	tyInfo, tyPkg, err := typeCheck(transPoints, pkgDir, fs, files)
+	tyInfo, tyPkg, err := typeCheck(transPoints, pkg.Birth, pkg.Files, files)
 	if err != nil {
 		// TODO: More informational error. Which translation failed? Is it related to try() elimination? Or simply original code has type error?
 		log(ftl(err))
@@ -196,8 +196,8 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 	log(hi("Type check"), "after phase-1", hi("end: "+pkgName))
 
 	nci := &nilCheckInsertion{
-		pkg:      pkg,
-		fileset:  fs,
+		pkg:      pkg.Node,
+		fileset:  pkg.Files,
 		roots:    tce.roots,
 		typeInfo: tyInfo,
 		pkgTypes: tyPkg,
@@ -212,6 +212,7 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 	log(hi("Phase-2"), "if err != nil check insertion", hi("end: "+pkgName))
 
 	log("Translation", hi("end: "+pkgName))
+	pkg.modified = true
 	return nil
 }
 
@@ -224,7 +225,7 @@ func translatePackage(pkgDir string, pkg *ast.Package, fs *token.FileSet) error 
 func Translate(pkgs []*Package) error {
 	log("Translate parsed packages:", pkgs)
 	for _, pkg := range pkgs {
-		if err := translatePackage(pkg.Birth, pkg.Node, pkg.Files); err != nil {
+		if err := translatePackage(pkg); err != nil {
 			return err
 		}
 	}
