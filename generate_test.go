@@ -145,6 +145,9 @@ func TestGenerateFindPackageDirsError(t *testing.T) {
 			if _, err := gen.PackageDirs(tc.paths); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatal("Unexpected error:", err)
 			}
+			if err := gen.Generate(tc.paths, false); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatal("Unexpected error:", err)
+			}
 		})
 	}
 }

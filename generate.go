@@ -172,16 +172,18 @@ func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 // When collecting TryGo packages from paths failed, packages parsing TryGo sources failed or the translations
 // failed, translated Go file could not be written, this function returns an error.
 func (gen *Gen) Generate(paths []string, verify bool) error {
-	log("Create outdir:", hi(gen.OutDir))
-	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
-		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
-	}
+	log("Start translation and generation for", paths)
 
 	dirs, err := gen.PackageDirs(paths)
 	if err != nil {
 		return err
 	}
 	log("Package directories:", hi(dirs))
+
+	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
+		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
+	}
+	log("Created outdir:", hi(gen.OutDir))
 
 	return gen.GeneratePackages(dirs, verify)
 }

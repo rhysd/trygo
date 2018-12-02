@@ -6,6 +6,7 @@ import (
 	"go/importer"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"strings"
 )
 
@@ -226,9 +227,17 @@ func Translate(pkgs []*Package) error {
 	log("Translate parsed packages:", pkgs)
 	for _, pkg := range pkgs {
 		if err := translatePackage(pkg); err != nil {
-			return err
+			return errors.Wrapf(err, "While translating %s", pkg.Birth)
 		}
 	}
 	fixImports(pkgs)
+	for _, pkg := range pkgs {
+		files := make(map[string]*ast.File, len(pkg.Node.Files))
+		for path, file := range pkg.Node.Files {
+			outpath := filepath.Join(pkg.Path, filepath.Base(path))
+			files[outpath] = file
+		}
+		pkg.Node.Files = files
+	}
 	return nil
 }

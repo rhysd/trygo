@@ -18,16 +18,21 @@ import (
 type Package struct {
 	// Files is a token file set to get position information of nodes.
 	Files *token.FileSet
-	// Node is an AST package node which was parsed from TryGo code. AST will be directly modified by translations.
+	// Node is an AST package node which was parsed from TryGo code. AST will be directly modified
+	// by translations.
 	Node *ast.Package
 	// Path is a package path where this translated package *will* be created.
 	Path string
 	// Birth is a pacakge path where this translated package was translated from.
-	Birth    string
+	Birth string
+	// Types is a type information of the package. This field is nil by default and set as the result
+	// of verification. So this field is non-nil only when verification was performed.
+	Types *types.Package
+	// Flag which is set to true when AST is modified
 	modified bool
 }
 
-func (pkg *Package) writeGoFileTo(out io.Writer, file *ast.File) error {
+func (pkg *Package) writeGo(out io.Writer, file *ast.File) error {
 	w := bufio.NewWriter(out)
 	if err := format.Node(w, pkg.Files, file); err != nil {
 		var buf bytes.Buffer
@@ -37,32 +42,41 @@ func (pkg *Package) writeGoFileTo(out io.Writer, file *ast.File) error {
 	return errors.Wrap(w.Flush(), "Cannot write file")
 }
 
-func (pkg *Package) writeGoFile(fname string, file *ast.File) error {
-	outpath := filepath.Join(pkg.Path, fname)
-	log("Write translated Go file to", hi(relpath(fname)))
+func (pkg *Package) writeGoFile(fpath string, file *ast.File) error {
+	log("Write translated Go file to", hi(relpath(fpath)))
 
-	if err := os.MkdirAll(filepath.Dir(outpath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 		return err
 	}
 
-	f, err := os.Create(outpath)
+	f, err := os.Create(fpath)
 	if err != nil {
-		return errors.Wrapf(err, "Cannot open output file %q", outpath)
+		return errors.Wrapf(err, "Cannot open output file %q", fpath)
 	}
 	defer f.Close()
 
-	return pkg.writeGoFileTo(f, file)
+	return pkg.writeGo(f, file)
 }
 
 func (pkg *Package) Write() error {
 	log("Write translated package:", hi(pkg.Birth), "->", hi(pkg.Path))
 	for path, node := range pkg.Node.Files {
-		fname := filepath.Base(path)
-		if err := pkg.writeGoFile(fname, node); err != nil {
+		// Separate function to writeGoFile() to avoid `defer f.Close()` in loop
+		if err := pkg.writeGoFile(path, node); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// WriteFileTo writes translated Go file to the given writer. If given file path does not indicate
+// any translated source, it returns an error.
+func (pkg *Package) WriteFileTo(out io.Writer, fpath string) error {
+	f, ok := pkg.Node.Files[fpath]
+	if !ok {
+		return errors.Errorf("No file translated for %q", fpath)
+	}
+	return pkg.writeGo(out, f)
 }
 
 func (pkg *Package) verify() error {
@@ -84,10 +98,11 @@ func (pkg *Package) verify() error {
 		files = append(files, f)
 	}
 
-	cfg.Check(pkg.Path, pkg.Files, files, &types.Info{})
+	typeInfo, _ := cfg.Check(pkg.Path, pkg.Files, files, &types.Info{})
 	if len(errs) > 0 {
 		return unifyTypeErrors("verification after translation", errs)
 	}
+	pkg.Types = typeInfo
 
 	// TODO: Add more verification for translation
 
@@ -109,6 +124,7 @@ func NewPackage(node *ast.Package, srcPath, destPath string, fs *token.FileSet) 
 		Node:     node,
 		Path:     destPath,
 		Birth:    srcPath,
+		Types:    nil,
 		modified: false,
 	}
 }
