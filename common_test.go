@@ -25,7 +25,7 @@ func init() {
 	onCI = onTravisCI || onAppveyor
 
 	// On CI, enabling log would help failure analysis
-	if onCI {
+	if onCI || os.Getenv("ENABLE_TEST_LOG") != "" {
 		trygo.InitLog(true)
 	}
 }

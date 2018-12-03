@@ -1,0 +1,4 @@
+package a
+
+func X() {
+}

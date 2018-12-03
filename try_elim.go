@@ -205,7 +205,7 @@ func (tce *tryCallElimination) visitSpec(spec *ast.ValueSpec) {
 	//     $retvals, _ = f(...)
 	spec.Names = append(spec.Names, newIdent("_", spec.Pos()))
 
-	log("Value spec at", pos, "added new translation point")
+	log(hi("Value spec translated"), "at", pos, "Added new translation point:", transKindValueSpec)
 }
 
 func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
@@ -253,12 +253,12 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 	//     $retvals, _ = f(...)
 	assign.Lhs = append(assign.Lhs, newIdent("_", assign.Pos()))
 
-	log("Assignment at", pos, "added new translation point")
+	log(hi("Assignment translated"), "at", hi(pos), "Added new translation point:", transKindAssign)
 }
 
 func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	pos := tce.logPos(stmt)
-	log("Assignment at", pos)
+	log("Toplevel call at", pos)
 
 	if ok := tce.eliminateTryCall(transKindToplevelCall, stmt, stmt.X); ok {
 		log(hi("Toplevel call translated"), "at", pos, "Added new translation point:", transKindToplevelCall)
@@ -351,10 +351,10 @@ func (tce *tryCallElimination) visitPre(node ast.Node) ast.Visitor {
 		tce.visitAssign(node)
 	case *ast.FuncDecl:
 		tce.funcs = tce.funcs.push(node)
-		log("Start function:", hi(node.Name.Name))
+		log(hi("Start function:"), node.Name.Name)
 	case *ast.FuncLit:
 		tce.funcs = tce.funcs.push(node)
-		log("Start function literal")
+		log(hi("Start function literal"))
 	case *ast.File:
 		log("File:", hi(node.Name.Name+".go"))
 		tce.file = node
@@ -366,10 +366,10 @@ func (tce *tryCallElimination) visitPost(node ast.Node) {
 	switch node := node.(type) {
 	case *ast.FuncDecl:
 		tce.funcs = tce.funcs.pop()
-		log("End function:", hi(node.Name.Name))
+		log(hi("End function:"), node.Name.Name)
 	case *ast.FuncLit:
 		tce.funcs = tce.funcs.pop()
-		log("End function literal")
+		log(hi("End function literal"))
 	}
 }
 

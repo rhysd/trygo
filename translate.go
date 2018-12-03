@@ -53,17 +53,6 @@ type transPoint struct {
 	pos        token.Pos
 }
 
-func (tp *transPoint) funcType() *ast.FuncType {
-	switch f := tp.fun.(type) {
-	case *ast.FuncLit:
-		return f.Type
-	case *ast.FuncDecl:
-		return f.Type
-	default:
-		return nil
-	}
-}
-
 type blockTree struct {
 	// This node can be ast.BlockStmt, ast.CaseClause, ast.CommClause
 	ast ast.Stmt
@@ -199,6 +188,7 @@ func translatePackage(pkg *Package) error {
 	tce.assertPostCondition()
 	log(hi("Phase-1"), "try() call elimination", hi("end: "+pkgName))
 
+	log("Number of translations:", hi(tce.numTrans))
 	if tce.numTrans == 0 {
 		// Nothing was translated. Can skip later process
 		return nil
@@ -252,6 +242,8 @@ func translatePackage(pkg *Package) error {
 // no longer correct.
 func Translate(pkgs []*Package) error {
 	log("Translate parsed packages:", pkgs)
+
+	// Translate try() calls with 2 stages
 	for _, pkg := range pkgs {
 		if err := translatePackage(pkg); err != nil {
 			return errors.Wrapf(err, "While translating %s", pkg.Birth)
@@ -271,6 +263,16 @@ func Translate(pkgs []*Package) error {
 			files[outpath] = file
 		}
 		pkg.Node.Files = files
+	}
+
+	if logEnabled {
+		modified := make([]string, 0, len(pkgs))
+		for _, pkg := range pkgs {
+			if pkg.modified {
+				modified = append(modified, pkg.Node.Name)
+			}
+		}
+		log("Translation done. Total packages:", hi(len(pkgs)), "Modified packages:", hi(len(modified)), modified)
 	}
 	return nil
 }
