@@ -44,8 +44,8 @@ type transPoint struct {
 	//   ValueStmt  -> var $vals, err = try(...)
 	//   CallExpr   -> standalone try(...) call in general expressions
 	//   ExprStmt   -> ExprStmt at toplevel of block
-	node       ast.Node
-	block      *ast.BlockStmt
+	node ast.Node
+	// blockIndex is the index in list of statements at the block when this transPOint was created
 	blockIndex int
 	fun        ast.Node      // *ast.FuncDecl or *ast.FuncLit
 	call       *ast.CallExpr // Function call in try() invocation
@@ -65,11 +65,38 @@ func (tp *transPoint) funcType() *ast.FuncType {
 }
 
 type blockTree struct {
-	ast *ast.BlockStmt
+	// This node can be ast.BlockStmt, ast.CaseClause, ast.CommClause
+	ast ast.Stmt
 	// transPoints *must* be in the order of statements in the block. Earlier statement must be before later statement in this slice.
 	transPoints []*transPoint
 	children    []*blockTree
 	parent      *blockTree
+}
+
+func (tree *blockTree) stmts() []ast.Stmt {
+	switch node := tree.ast.(type) {
+	case *ast.BlockStmt:
+		return node.List
+	case *ast.CaseClause:
+		return node.Body
+	case *ast.CommClause:
+		return node.Body
+	default:
+		panic("Unreachable")
+	}
+}
+
+func (tree *blockTree) setStmts(stmts []ast.Stmt) {
+	switch node := tree.ast.(type) {
+	case *ast.BlockStmt:
+		node.List = stmts
+	case *ast.CaseClause:
+		node.Body = stmts
+	case *ast.CommClause:
+		node.Body = stmts
+	default:
+		panic("Unreachable")
+	}
 }
 
 func (tree *blockTree) isRoot() bool {

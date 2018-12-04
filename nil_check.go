@@ -28,7 +28,7 @@ type nilCheckInsertion struct {
 	pkg      *ast.Package
 	fileset  *token.FileSet
 	roots    []*blockTree
-	blk      *ast.BlockStmt
+	blk      *blockTree
 	offset   int
 	varID    int
 	typeInfo *types.Info
@@ -87,25 +87,25 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
-	logf("Insert %T statements to block at %s", stmt, nci.logPos(nci.blk))
-	prev := nci.blk.List
+	logf("Insert %T statements to block at %s", stmt, nci.logPos(nci.blk.ast))
+	prev := nci.blk.stmts()
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx:]
 	ls := make([]ast.Stmt, 0, len(prev)+1)
 	ls = append(ls, l...)
 	ls = append(ls, stmt)
 	ls = append(ls, r...)
-	nci.blk.List = ls
-	nci.offset += 1
+	nci.blk.setStmts(ls)
+	nci.offset++
 }
 
 func (nci *nilCheckInsertion) removeStmtAt(idx int) {
-	prev := nci.blk.List
+	prev := nci.blk.stmts()
 	idx += nci.offset
 	l, r := prev[:idx], prev[idx+1:]
-	nci.blk.List = append(l, r...)
+	nci.blk.setStmts(append(l, r...))
 	nci.offset--
-	log(hi(idx+1, "th statement was removed from block at", nci.logPos(nci.blk)))
+	log(hi(idx+1, "th statement was removed from block at", nci.logPos(nci.blk.ast)))
 }
 
 func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos token.Pos) (expr ast.Expr) {
@@ -222,7 +222,7 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 	}
 
 	nci.insertStmtAt(index+1, stmt)
-	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.logPos(nci.blk))
+	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.logPos(nci.blk.ast))
 	return nil
 }
 
@@ -358,7 +358,7 @@ func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
 }
 
 func (nci *nilCheckInsertion) block(b *blockTree) error {
-	nci.blk = b.ast
+	nci.blk = b
 	nci.offset = 0
 	nci.varID = 0
 

@@ -166,7 +166,6 @@ func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, m
 	p := &transPoint{
 		kind:       kind,
 		node:       node,
-		block:      tce.currentBlk.ast,
 		blockIndex: tce.blkIndex,
 		fun:        tce.funcs.top(),
 		call:       tryCall, // tryCall points inner call here
@@ -254,14 +253,12 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	log("New translation point for toplevel try() call at", pos)
 }
 
-func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
-	pos := tce.logPos(block)
-	log("Block statement start", pos)
-
+// Returns parent's current index
+func (tce *tryCallElimination) pushBlock(node ast.Stmt) int {
 	parent := tce.currentBlk
-	tree := &blockTree{ast: block, parent: parent}
+	tree := &blockTree{ast: node, parent: parent}
 	if tree.isRoot() {
-		log("New root block added at", pos)
+		log("New root block added")
 		tce.roots = append(tce.roots, tree)
 	} else {
 		parent.children = append(parent.children, tree)
@@ -269,9 +266,19 @@ func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
 
 	tce.parentBlk = parent
 	tce.currentBlk = tree
-	prevIdx := tce.blkIndex
+	return tce.blkIndex
+}
 
-	for i, stmt := range block.List {
+func (tce *tryCallElimination) popBlock(prevIdx int) {
+	tce.blkIndex = prevIdx
+	tce.currentBlk = tce.parentBlk
+	if tce.parentBlk != nil {
+		tce.parentBlk = tce.parentBlk.parent
+	}
+}
+
+func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
+	for i, stmt := range stmts {
 		if tce.err != nil {
 			return
 		}
@@ -285,21 +292,31 @@ func (tce *tryCallElimination) visitBlock(block *ast.BlockStmt) {
 			ast.Walk(tce, stmt)
 		}
 	}
+}
 
-	tce.blkIndex = prevIdx
-	if tce.parentBlk != nil {
-		tce.parentBlk = tce.parentBlk.parent
-	}
-	tce.currentBlk = tce.parentBlk
+func (tce *tryCallElimination) visitBlockNode(node ast.Stmt, list []ast.Stmt) {
+	pos := tce.logPos(node)
+	ty := reflect.TypeOf(node)
+	log(hi("Block in ", ty, " start"), "at", pos)
 
-	log("Block statement end", pos)
+	prevIdx := tce.pushBlock(node)
+	tce.visitStmts(list)
+	tce.popBlock(prevIdx)
+
+	log(hi("Block in ", ty, " end"), "at", pos)
 }
 
 func (tce *tryCallElimination) visitPre(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.BlockStmt:
-		tce.visitBlock(node)
-		return nil // visitBlock recursively calls ast.Walk()
+		tce.visitBlockNode(node, node.List)
+		return nil // visitBlockNode() recursively calls ast.Walk() in itself
+	case *ast.CaseClause:
+		tce.visitBlockNode(node, node.Body)
+		return nil // visitBlockNode() recursively calls ast.Walk() in itself
+	case *ast.CommClause:
+		tce.visitBlockNode(node, node.Body)
+		return nil // visitBlockNode() recursively calls ast.Walk() in itself
 	case *ast.ValueSpec:
 		// var or const
 		tce.visitSpec(node)
