@@ -154,15 +154,15 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 		default:
 			panic("Unreachable")
 		}
-	case *types.Array, *types.Slice, *types.Pointer, *types.Signature, *types.Interface, *types.Map, *types.Chan:
+	case *types.Slice, *types.Pointer, *types.Signature, *types.Interface, *types.Map, *types.Chan:
 		expr = newIdent("nil", pos)
-	case *types.Struct:
+	case *types.Struct, *types.Array:
 		// To create CompositeLit for zero value of immediate struct, we reuse the AST node from return type of
 		// function declaration because reconstruct immediate struct type AST node from *types.Struct needs bunch
 		// of code for constructing ast.Expr from types.Type generally.
 		// Note that position of AST node is not correct.
 		expr = &ast.CompositeLit{Type: typeNode}
-		log("AST type node at", nci.logPos(typeNode), "is reused to generate zero value of *types.Struct")
+		log("AST type node at", nci.logPos(typeNode), "is reused to generate zero value of", reflect.TypeOf(typeNode))
 	case *types.Named:
 		u := ty.Underlying()
 		if _, ok := u.(*types.Struct); ok {
