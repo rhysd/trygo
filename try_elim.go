@@ -112,7 +112,7 @@ func (tce *tryCallElimination) checkTryCall(maybeCall ast.Expr) (tryCall *ast.Ca
 	}
 
 	if len(outer.Args) != 1 {
-		tce.errfAt(outer, "try() takes 1 argument but %d found", len(outer.Args))
+		tce.errfAt(outer, "try() should take 1 argument but %d arguments passed", len(outer.Args))
 		return nil, nil, false
 	}
 
@@ -255,12 +255,16 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	pos := tce.logPos(stmt)
 	log("Assignment at", pos)
 
-	if ok := tce.eliminateTryCall(transKindToplevelCall, stmt, stmt.X); !ok {
-		// Error
+	if ok := tce.eliminateTryCall(transKindToplevelCall, stmt, stmt.X); ok {
+		log(hi("Toplevel call translated"), "at", pos, "Added new translation point:", transKindToplevelCall)
 		return
 	}
 
-	log("New translation point for toplevel try() call at", pos)
+	if tce.err == nil {
+		// Recursively visit an expression in ExprStmt. This is necessary to find out non-translated
+		// try() calls to make an error
+		ast.Walk(tce, stmt.X)
+	}
 }
 
 // Returns parent's current index
@@ -309,15 +313,22 @@ func (tce *tryCallElimination) visitBlockNode(node ast.Stmt, list []ast.Stmt) {
 	ty := reflect.TypeOf(node)
 	log(hi("Block in ", ty, " start"), "at", pos)
 
+	tce.parents = tce.parents.push(node)
 	prevIdx := tce.pushBlock(node)
 	tce.visitStmts(list)
 	tce.popBlock(prevIdx)
+	tce.parents = tce.parents.pop()
 
 	log(hi("Block in ", ty, " end"), "at", pos)
 }
 
 func (tce *tryCallElimination) visitPre(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
+	case *ast.CallExpr:
+		if ident, ok := node.Fun.(*ast.Ident); ok && ident.Name == "try" {
+			tce.errAt(ident, "try() call was not translated. Only try() calls at toplevel call expression, assignments (= or :=), value spec (var or const) are translated")
+			return nil
+		}
 	case *ast.BlockStmt:
 		tce.visitBlockNode(node, node.List)
 		return nil // visitBlockNode() recursively calls ast.Walk() in itself
