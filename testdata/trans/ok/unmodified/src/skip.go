@@ -20,5 +20,6 @@ func Bar() (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	err, err = Foo(1), Foo(2)
 	return 42, nil
 }

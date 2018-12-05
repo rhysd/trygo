@@ -1,0 +1,3 @@
+Type error(s) at type check after phase-1
+x declared but not used
+int value in return statement

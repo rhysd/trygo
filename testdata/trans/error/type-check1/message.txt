@@ -1,0 +1,5 @@
+Type error(s) at type check after phase-1
+undeclared name: x
+missing return
+"unknown/package/path" imported but not used
+"unknown/package/path2" imported but not used

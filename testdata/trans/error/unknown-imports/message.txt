@@ -1,0 +1,4 @@
+3 import error(s)
+Cannot resolve import path
+"/path/to/unknown/package1"
+"/path/to/unknown/package2"

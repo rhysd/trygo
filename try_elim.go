@@ -134,11 +134,12 @@ func (tce *tryCallElimination) checkTryCall(maybeCall ast.Expr) (tryCall *ast.Ca
 	case *ast.FuncDecl:
 		funcTy = f.Type
 	}
-	rets := funcTy.Results.List
-	if len(rets) == 0 {
+
+	if funcTy.Results == nil || len(funcTy.Results.List) == 0 {
 		tce.errAt(outer, "The function returns nothing. try() is not available")
 		return nil, nil, false
 	}
+	rets := funcTy.Results.List
 
 	ty := rets[len(rets)-1].Type
 	if ident, ok := ty.(*ast.Ident); !ok || ident.Name != "error" {

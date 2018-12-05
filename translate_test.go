@@ -129,3 +129,40 @@ func TestTranslationOK(t *testing.T) {
 		})
 	}
 }
+
+func TestTranslationError(t *testing.T) {
+	base := filepath.Join(cwd, "testdata", "trans", "error")
+	entries, err := ioutil.ReadDir(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dir := filepath.Join(base, entry.Name())
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkgs := collectPackagesUnder(dir, t)
+			err := trygo.Translate(pkgs)
+			if err == nil {
+				t.Fatal("Error did not occur:", pkgs)
+			}
+			have := err.Error()
+
+			b, err := ioutil.ReadFile(filepath.Join(dir, "message.txt"))
+			if err != nil {
+				t.Fatal("message.txt cannot be read:", err)
+			}
+			for _, want := range strings.Split(string(b), "\n") {
+				if want == "" {
+					continue
+				}
+				if !strings.Contains(have, want) {
+					t.Fatalf("Error is unexpected. Wanted %q to be included in %q", want, have)
+				}
+			}
+		})
+	}
+}

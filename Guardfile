@@ -22,15 +22,24 @@ guard :shell do
     case m[0]
     when /_test\.go$/
       run_tests m[0]
-    when /^testdata\/gen\//
+    when %r{^testdata/gen/}
       run_tests 'generate_test.go'
-    when /^testdata\/trans\//
-      m[0] =~ %r{testdata/trans/ok/([^/]+)/}
+    when %r{^testdata/trans/ok/([^/]+)/}
       run_tests 'translate_test.go', "-run TestTranslationOK/#{$1}"
-    when /^[^\/]+\.go$/
+    when %r{^testdata/trans/error/([^/]+)/}
+      run_tests 'translate_test.go', "-run TestTranslationError/#{$1}"
+    when %r{^[^/]+\.go$}
       run 'go build ./cmd/trygo'
       run "golint #{m[0]}"
       run 'go vet'
+    end
+  end
+
+  watch /\.txt$/ do |m|
+    puts "#{Time.now}: #{m[0]}"
+    case m[0]
+    when %r{^testdata/trans/error/([^/]+)/message\.txt$}
+      run_tests 'translate_test.go', "-run TestTranslationError/#{$1}"
     end
   end
 end

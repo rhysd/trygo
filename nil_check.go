@@ -45,12 +45,6 @@ func (nci *nilCheckInsertion) logPos(node ast.Node) string {
 	return relpath(nci.nodePos(node).String())
 }
 
-func (nci *nilCheckInsertion) genIdent(pos token.Pos) *ast.Ident {
-	id := nci.varID
-	nci.varID++
-	return newIdent(fmt.Sprintf("_%d", id), pos)
-}
-
 func (nci *nilCheckInsertion) genErrIdent(pos token.Pos) *ast.Ident {
 	i := newIdent(fmt.Sprintf("_err%d", nci.varID), pos)
 	nci.varID++
