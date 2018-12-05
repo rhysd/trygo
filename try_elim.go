@@ -234,6 +234,11 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 		return
 	}
 
+	if assign.Tok != token.DEFINE && assign.Tok != token.ASSIGN {
+		tce.errfAt(assign, "try() can only be used with = and :=, but found %s. Note that compound assignments such as += are not supported", assign.Tok)
+		return
+	}
+
 	// Not to break type check, add _ at LHS here
 	//
 	// Total translation at stage-1 is:
