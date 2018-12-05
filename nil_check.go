@@ -115,7 +115,7 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 	switch ty := ty.(type) {
 	case *types.Basic:
 		switch ty.Kind() {
-		case types.Bool, types.UntypedBool, types.UntypedInt:
+		case types.Bool:
 			expr = newIdent("false", pos)
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
 			types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64,
@@ -125,32 +125,29 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 				Value:    "0",
 				ValuePos: pos,
 			}
-		case types.Float32, types.Float64, types.UntypedFloat:
+		case types.Float32, types.Float64:
 			expr = &ast.BasicLit{
 				Kind:     token.FLOAT,
 				Value:    "0.0",
 				ValuePos: pos,
 			}
-		case types.Complex64, types.Complex128, types.UntypedComplex:
+		case types.Complex64, types.Complex128:
 			expr = &ast.BasicLit{
 				Kind:     token.IMAG,
 				Value:    "0i",
 				ValuePos: pos,
 			}
-		case types.String, types.UntypedString:
+		case types.String:
 			expr = &ast.BasicLit{
 				Kind:     token.STRING,
 				Value:    `""`,
 				ValuePos: pos,
 			}
-		case types.UnsafePointer, types.UntypedNil:
+		case types.UnsafePointer:
 			expr = newIdent("nil", pos)
-		case types.UntypedRune:
-			expr = &ast.BasicLit{
-				Kind:     token.CHAR,
-				Value:    `'\0'`,
-				ValuePos: pos,
-			}
+		case types.UntypedBool, types.UntypedInt, types.UntypedFloat, types.UntypedComplex,
+			types.UntypedString, types.UntypedNil, types.UntypedRune:
+			panic("Untyped types must not appear while calculating zero values since they are calculated from function return types:" + reflect.TypeOf(ty).String())
 		default:
 			panic("Unreachable")
 		}
