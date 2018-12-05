@@ -257,7 +257,13 @@ func Translate(pkgs []*Package) error {
 			return errors.Wrapf(err, "While translating %s", pkg.Birth)
 		}
 	}
-	fixImports(pkgs)
+
+	// Fix all import paths considering translations
+	if err := fixImports(pkgs); err != nil {
+		return err
+	}
+
+	// Fix file paths considering translations
 	for _, pkg := range pkgs {
 		files := make(map[string]*ast.File, len(pkg.Node.Files))
 		for path, file := range pkg.Node.Files {

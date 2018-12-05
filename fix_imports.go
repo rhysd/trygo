@@ -1,6 +1,8 @@
 package trygo
 
 import (
+	"fmt"
+	"github.com/pkg/errors"
 	"go/ast"
 	"go/build"
 	"strconv"
@@ -10,26 +12,44 @@ import (
 // Import statements which import translated packages are still looking wrong paths.
 // Considering translation, the import paths must be fixed not to break compilation.
 
+type importError struct {
+	msg  string
+	node ast.Node
+}
+
+func (err *importError) Error() string {
+	return err.msg
+}
+
 type importsFixer struct {
 	transMap  map[string]string
 	ctx       build.Context
 	pathToDir map[string]string
 	count     int
+	errs      []*importError
 }
 
-func (fixer *importsFixer) resolveImportPath(path string, pkgDir string) string {
+func (fixer *importsFixer) errAt(node ast.Node, msg string) {
+	err := &importError{msg, node}
+	log(ftl(err))
+	fixer.errs = append(fixer.errs, err)
+}
+
+func (fixer *importsFixer) errfAt(node ast.Node, format string, args ...interface{}) {
+	fixer.errAt(node, fmt.Sprintf(format, args...))
+}
+
+func (fixer *importsFixer) resolveImportPath(path string, pkgDir string) (string, error) {
 	if p, ok := fixer.pathToDir[path]; ok {
-		return p
+		return p, nil
 	}
 	p, err := fixer.ctx.Import(path, pkgDir, build.FindOnly)
 	if err != nil {
-		// Panic due to internal fatal error. Type check was already passed so import paths should
-		// be resolved correctly.
-		panic("Cannot resolve import path '" + path + "': " + err.Error())
+		return "", err
 	}
 	fixer.pathToDir[path] = p.Dir
 	log("Import path", hi(path), "was resolved to", hi(p.Dir))
-	return p.Dir
+	return p.Dir, nil
 }
 
 func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) bool {
@@ -42,7 +62,14 @@ func (fixer *importsFixer) fixImport(node *ast.ImportSpec, pkgDir string) bool {
 		panic("Import path is broken Go string: " + node.Path.Value)
 	}
 
-	srcDir := fixer.resolveImportPath(path, pkgDir)
+	srcDir, err := fixer.resolveImportPath(path, pkgDir)
+	if err != nil {
+		// This error may happen in normal case when translating TryGo code does not contain any try() call.
+		// In the case, try() call elimination returns early just after stage 1 and type check is not performed.
+		// When the TryGo code contains an invalid import statement, it causes an error here.
+		fixer.errfAt(node, "Cannot resolve import path %q: %s", path, err)
+		return false
+	}
 
 	destDir, ok := fixer.transMap[srcDir]
 	if !ok {
@@ -79,16 +106,39 @@ func (fixer *importsFixer) fixPackage(pkg *Package) {
 	}
 }
 
-func fixImports(pkgs []*Package) {
+func fixImports(pkgs []*Package) error {
 	l := len(pkgs)
 	log("Fix imports in", l, "packages")
 	m := make(map[string]string, l)
 	for _, pkg := range pkgs {
 		m[pkg.Birth] = pkg.Path
 	}
-	fixer := &importsFixer{m, build.Default, map[string]string{}, 0}
+
+	fixer := &importsFixer{m, build.Default, map[string]string{}, 0, nil}
 	for _, pkg := range pkgs {
 		fixer.fixPackage(pkg)
 	}
+
+	if len(fixer.errs) > 0 {
+		fset := pkgs[0].Files
+		if len(fixer.errs) == 1 {
+			pos := fset.Position(fixer.errs[0].node.Pos())
+			err := errors.Errorf("Import error while fixing import paths: At %s: %s", pos, fixer.errs[0])
+			log(ftl(err))
+			return err
+		}
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d import error(s) while fixing import paths:", len(fixer.errs))
+		for _, err := range fixer.errs {
+			fmt.Fprintf(&b, "\n  %s at %s", err.msg, fset.Position(err.node.Pos()))
+		}
+
+		msg := b.String()
+		log(ftl(msg))
+		return errors.New(msg)
+	}
+
 	log("Fix imports done.", fixer.count, "imports were fixed")
+	return nil
 }
