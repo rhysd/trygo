@@ -220,6 +220,16 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 		return
 	}
 
+	switch tce.parents.top().(type) {
+	case *ast.BlockStmt, *ast.CommClause, *ast.CaseClause:
+		// ok, go ahead
+	default:
+		// This assignment is not at toplevel, for example, `if x := e; ...` or `for x := range e`...
+		// Only toplevel assignments (= or :=) should be translated to avoid wrong if err != nil check insertion
+		log("Skipped non-toplevel assignment at", pos)
+		return
+	}
+
 	if ok := tce.eliminateTryCall(transKindAssign, assign, assign.Rhs[0]); !ok {
 		return
 	}
