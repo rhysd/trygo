@@ -20,7 +20,8 @@ func CreateFileInSubdir(subdir, filename string, content []byte) error {
         return err
     }
 
-    f, err := os.Create(filepath.Join(cwd, subdir, filename))
+    p := filepath.Join(cwd, subdir, filename)
+    f, err := os.Create(p)
     if err != nil {
         return err
     }
@@ -29,6 +30,8 @@ func CreateFileInSubdir(subdir, filename string, content []byte) error {
     if _, err := f.Write(content); err != nil {
         return err
     }
+
+    fmt.Println("Created:", p)
     return nil
 }
 ```
@@ -38,15 +41,23 @@ TryGo:
 ```go
 func CreateFileInSubdir(subdir, filename string, content []byte) error {
     cwd := try(os.Getwd())
+
     try(os.Mkdir(filepath.Join(cwd, subdir)))
-    f := try(os.Create(filepath.Join(cwd, subdir, filename)))
+
+    p := filepath.Join(cwd, subdir, filename)
+    f := try(os.Create(p))
     defer f.Close()
+
     try(f.Write(content))
+
+    fmt.Println("Created:", p)
     return nil
 }
 ```
 
 There is only one difference between Go and TryGo. Special magic function `try()` is provided in TryGo.
+
+
 
 ## Spec
 
@@ -192,6 +203,8 @@ ss := []string{tmp1, tmp2, tmp3, s2[:n]}
 
 These ill-formed code should be detected by translator and it will raise an error.
 
+
+
 ## Why `try()` 'function'? Why not `?` operator?
 
 Following code may look even better. At least I think so.
@@ -219,8 +232,23 @@ To build from source:
 $ go get -u github.com/rhysd/trygo/cmd/trygo
 ```
 
+
+
+## Usage
+
+```
+$ trygo -o {outpath} {inpaths}
+```
+
+`{inpaths}` is a list of directory paths of Go packages you want to translate. The directories are
+translated recursively. For example, when `dir` is passed and there are 2 packages `dir` and `dir/nested`,
+both packages will be translated.
+
+`{outpath}` is a directory path where translated Go packages are put. For example, when `dir` is specified
+as `{inpaths}` and `out` is specified as `{outpath}`, `dir/**` packages are translated as `out/dir/**`.
+
+
+
 ## License
 
 [MIT License](LICENSE.txt)
-
-TODO: まずは $retvals, err := Foo(...) に変換したあと，後ろの if err != nil を入れないでおく．次に型チェックして $retvals の型を得る．再度 AST をトラバースして該当箇所の型情報を手に入れ，if err != nil を補完する
