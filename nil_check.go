@@ -2,7 +2,6 @@ package trygo
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -66,21 +65,23 @@ func (nci *nilCheckInsertion) typeInfoFor(node ast.Expr) types.Type {
 	return t.Type
 }
 
-func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.FuncType, error) {
+func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.FuncType) {
 	if decl, ok := node.(*ast.FuncDecl); ok {
 		obj, ok := nci.typeInfo.Defs[decl.Name]
 		if !ok {
-			return nil, nil, errors.Errorf("Type cannot be resolved: Function declaration '%s' at %s", decl.Name.Name, nci.nodePos(decl))
+			// This case never occur in normal cases since type check passed. There must not be
+			// unresolved identifiers whose types are unknown.
+			panic(fmt.Sprintf("Type check was OK but type cannot be resolved for function '%s' at %s", decl.Name.Name, nci.nodePos(decl)))
 		}
 		ty := obj.Type().(*types.Signature)
 		log("Function type of func", decl.Name.Name, "->", ty)
-		return ty, decl.Type, nil
+		return ty, decl.Type
 	}
 
 	lit := node.(*ast.FuncLit)
 	ty := nci.typeInfoFor(lit).(*types.Signature)
 	log("Function type of func literal at", nci.logPos(lit), "->", ty)
-	return ty, lit.Type, nil
+	return ty, lit.Type
 }
 
 // insertStmts inserts given statements *before* given index position of current block. If previous
@@ -185,11 +186,8 @@ func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos 
 	return
 }
 
-func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.Ident, init ast.Stmt, fun ast.Node) error {
-	funcTy, funcTyNode, err := nci.funcTypeOf(fun)
-	if err != nil {
-		return err
-	}
+func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.Ident, init ast.Stmt, fun ast.Node) {
+	funcTy, funcTyNode := nci.funcTypeOf(fun)
 	pos := errIdent.NamePos
 	rets := funcTy.Results()
 	retLen := rets.Len()
@@ -223,10 +221,9 @@ func (nci *nilCheckInsertion) insertIfNilChkStmtAfter(index int, errIdent *ast.I
 
 	nci.insertStmtAt(index+1, stmt)
 	log("Inserted `if` statement for nil check at index", index+1, "of block at", nci.logPos(nci.blk.ast))
-	return nil
 }
 
-func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) (err error) {
+func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPoint) {
 	// From:
 	//   var $retvals, _ = f(...)
 	// To:
@@ -237,12 +234,12 @@ func (nci *nilCheckInsertion) transValueSpec(node *ast.ValueSpec, trans *transPo
 	errIdent := nci.genErrIdent(node.Pos())
 	log(hi("Start value spec (var =)"), "translation", errIdent.Name)
 	node.Names[len(node.Names)-1] = errIdent
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
-	log(hi("End value spec (var =)"), "translation", errIdent.Name, err)
+	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
+	log(hi("End value spec (var =)"), "translation", errIdent.Name)
 	return
 }
 
-func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoint) (err error) {
+func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoint) {
 	// From:
 	//   $retvals, _ := f(...)
 	// To:
@@ -254,8 +251,8 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 		errIdent := nci.genErrIdent(node.Pos())
 		log(hi("Start define statement(:=)"), "translation", errIdent.Name)
 		node.Lhs[len(node.Lhs)-1] = errIdent
-		err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
-		log(hi("End define statement(:=)"), "translation", errIdent.Name, err)
+		nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
+		log(hi("End define statement(:=)"), "translation", errIdent.Name)
 		return
 	}
 
@@ -289,12 +286,11 @@ func (nci *nilCheckInsertion) transAssign(node *ast.AssignStmt, trans *transPoin
 	nci.insertStmtAt(trans.blockIndex, decl)
 
 	node.Lhs[len(node.Lhs)-1] = errIdent
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
-	log(hi("End assign statement(=)"), "translation", errIdent.Name, err)
-	return
+	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, nil, trans.fun)
+	log(hi("End assign statement(=)"), "translation", errIdent.Name)
 }
 
-func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
+func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) {
 	// From:
 	//   f(...)
 	// To:
@@ -334,22 +330,21 @@ func (nci *nilCheckInsertion) transToplevelExpr(trans *transPoint) (err error) {
 	}
 
 	// Insert if err := ...; err != nil { ... }
-	err = nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, assign, trans.fun)
+	nci.insertIfNilChkStmtAfter(trans.blockIndex, errIdent, assign, trans.fun)
 
-	log(hi("End toplevel try()"), "translation", err)
-	return
+	log(hi("End toplevel try()"), "translation")
 }
 
-func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
+func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) {
 	log(hi("Insert if err != nil check for "+trans.kind.String()), "at", nci.logPos(trans.node))
 
 	switch trans.kind {
 	case transKindValueSpec:
-		return nci.transValueSpec(trans.node.(*ast.ValueSpec), trans)
+		nci.transValueSpec(trans.node.(*ast.ValueSpec), trans)
 	case transKindAssign:
-		return nci.transAssign(trans.node.(*ast.AssignStmt), trans)
+		nci.transAssign(trans.node.(*ast.AssignStmt), trans)
 	case transKindToplevelCall:
-		return nci.transToplevelExpr(trans)
+		nci.transToplevelExpr(trans)
 	case transKindExpr:
 		panic("TODO: Translate non-toplevel try() call expressions")
 	default:
@@ -357,7 +352,7 @@ func (nci *nilCheckInsertion) insertNilCheck(trans *transPoint) error {
 	}
 }
 
-func (nci *nilCheckInsertion) block(b *blockTree) error {
+func (nci *nilCheckInsertion) block(b *blockTree) {
 	nci.blk = b
 	nci.offset = 0
 	nci.varID = 0
@@ -365,27 +360,18 @@ func (nci *nilCheckInsertion) block(b *blockTree) error {
 	pos := nci.logPos(b.ast)
 	log("Start nil check insertion for block at", pos)
 	for _, trans := range b.transPoints {
-		if err := nci.insertNilCheck(trans); err != nil {
-			return err
-		}
+		nci.insertNilCheck(trans)
 	}
 	log("End nil check insertion for block at", pos)
 
 	log("Recursively insert nil check to", hi(len(b.children)), "children in block at", pos)
 	for _, child := range b.children {
-		if err := nci.block(child); err != nil {
-			return err
-		}
+		nci.block(child)
 	}
-
-	return nil
 }
 
-func (nci *nilCheckInsertion) translate() error {
+func (nci *nilCheckInsertion) translate() {
 	for _, root := range nci.roots {
-		if err := nci.block(root); err != nil {
-			return err
-		}
+		nci.block(root)
 	}
-	return nil
 }

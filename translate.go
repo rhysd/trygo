@@ -221,12 +221,9 @@ func translatePackage(pkg *Package) error {
 		pkgTypes: tyPkg,
 	}
 
-	log(hi("Phase-2"), "if err != nil check insertion", hi("start: "+pkgName))
 	// Traverse blocks for phase-2
-	if err := nci.translate(); err != nil {
-		log(ftl(err))
-		return err
-	}
+	log(hi("Phase-2"), "if err != nil check insertion", hi("start: "+pkgName))
+	nci.translate()
 	log(hi("Phase-2"), "if err != nil check insertion", hi("end: "+pkgName))
 
 	log("Translation", hi("end: "+pkgName))
