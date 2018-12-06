@@ -2,7 +2,7 @@ package trygo
 
 import (
 	"bufio"
-	"bytes"
+	"fmt"
 	"github.com/pkg/errors"
 	"go/ast"
 	"go/format"
@@ -35,9 +35,10 @@ type Package struct {
 func (pkg *Package) writeGo(out io.Writer, file *ast.File) error {
 	w := bufio.NewWriter(out)
 	if err := format.Node(w, pkg.Files, file); err != nil {
-		var buf bytes.Buffer
-		ast.Fprint(&buf, pkg.Files, file, nil)
-		return errors.Wrapf(err, "Broken Go source: %s\n%s", file.Name.Name+".go", buf.String())
+		if logEnabled {
+			ast.Fprint(os.Stderr, pkg.Files, file, nil)
+		}
+		panic(fmt.Sprintf("Internal error: Broken Go source: %s: %s", file.Name.Name+".go", err))
 	}
 	return errors.Wrap(w.Flush(), "Cannot write file")
 }
@@ -79,7 +80,9 @@ func (pkg *Package) WriteFileTo(out io.Writer, fpath string) error {
 	return pkg.writeGo(out, f)
 }
 
-func (pkg *Package) verify() error {
+// Verify verifies the package is valid by type check. When there are some errors, it returns an error
+// created by unifying all errors into one error.
+func (pkg *Package) Verify() error {
 	log("Verify translated package ", hi(pkg.Node.Name), "at", hi(relpath(pkg.Path)))
 	// Verify translated package by type check
 	errs := []error{}

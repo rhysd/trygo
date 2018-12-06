@@ -154,7 +154,7 @@ func (gen *Gen) GeneratePackages(pkgDirs []string, verify bool) error {
 				log("Skip verification of unmodified package", pkg.Node.Name, "translated from", relpath(pkg.Birth))
 				continue
 			}
-			if err := pkg.verify(); err != nil {
+			if err := pkg.Verify(); err != nil {
 				return errors.Wrap(err, "Type error while verification after translation")
 			}
 		}
