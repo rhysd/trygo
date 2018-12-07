@@ -88,6 +88,24 @@ func (tree *blockTree) setStmts(stmts []ast.Stmt) {
 	}
 }
 
+func (tree *blockTree) insertStmtAt(idx int, stmt ast.Stmt) {
+	logf("Insert %T statement at index %d of block %T", stmt, idx, tree.ast)
+	prev := tree.stmts()
+	l, r := prev[:idx], prev[idx:]
+	ls := make([]ast.Stmt, 0, len(prev)+1)
+	ls = append(ls, l...)
+	ls = append(ls, stmt)
+	ls = append(ls, r...)
+	tree.setStmts(ls)
+}
+
+func (tree *blockTree) removeStmtAt(idx int) {
+	prev := tree.stmts()
+	logf("Remove %T statement at index %d of block %T", prev[idx], idx, tree.ast)
+	l, r := prev[:idx], prev[idx+1:]
+	tree.setStmts(append(l, r...))
+}
+
 func (tree *blockTree) isRoot() bool {
 	return tree.parent == nil
 }

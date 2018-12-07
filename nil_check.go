@@ -82,25 +82,15 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 // translation exists in the same block and some statements were already inserted, the offset is
 // automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
-	logf("Insert %T statements to block at %s", stmt, nci.logPos(nci.blk.ast))
-	prev := nci.blk.stmts()
-	idx += nci.offset
-	l, r := prev[:idx], prev[idx:]
-	ls := make([]ast.Stmt, 0, len(prev)+1)
-	ls = append(ls, l...)
-	ls = append(ls, stmt)
-	ls = append(ls, r...)
-	nci.blk.setStmts(ls)
+	logf("Insert statement at index %d with offset %d", idx, nci.offset)
+	nci.blk.insertStmtAt(idx+nci.offset, stmt)
 	nci.offset++
 }
 
 func (nci *nilCheckInsertion) removeStmtAt(idx int) {
-	prev := nci.blk.stmts()
-	idx += nci.offset
-	l, r := prev[:idx], prev[idx+1:]
-	nci.blk.setStmts(append(l, r...))
+	logf("Remove statement at index %d with offset %d", idx, nci.offset)
+	nci.blk.removeStmtAt(idx + nci.offset)
 	nci.offset--
-	log(hi(idx+1, "th statement was removed from block at", nci.logPos(nci.blk.ast)))
 }
 
 func (nci *nilCheckInsertion) zeroValueOf(ty types.Type, typeNode ast.Expr, pos token.Pos) (expr ast.Expr) {
