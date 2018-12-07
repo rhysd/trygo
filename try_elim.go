@@ -48,6 +48,34 @@ func (ns nodeStack) assertEmpty(forWhat string) {
 	panic(fmt.Sprintf("AST node stack for %s is not fully poped: %s", forWhat, ns.show()))
 }
 
+type tempIDGen struct {
+	id        uint
+	generated map[*ast.Ident]struct{}
+}
+
+func (gen *tempIDGen) newTempID() *ast.Ident {
+	ident := ast.NewIdent(fmt.Sprintf("_%d", gen.id))
+	gen.generated[ident] = struct{}{}
+	gen.id++
+	return ident
+}
+
+func (gen *tempIDGen) isTempID(expr ast.Expr) bool {
+	i, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, ok = gen.generated[i]
+	return ok
+}
+
+func newTempIDGen() *tempIDGen {
+	return &tempIDGen{
+		id:        0,
+		generated: map[*ast.Ident]struct{}{},
+	}
+}
+
 type tryCallElimination struct {
 	pkg        *ast.Package
 	fileset    *token.FileSet
@@ -59,6 +87,7 @@ type tryCallElimination struct {
 	blkIndex   int
 	parents    nodeStack
 	funcs      nodeStack
+	tempID     *tempIDGen
 	numTrans   int
 }
 
@@ -90,41 +119,33 @@ func (tce *tryCallElimination) errfAt(node ast.Node, format string, args ...inte
 	tce.errAt(node, fmt.Sprintf(format, args...))
 }
 
-// checkTryCall checks given try() call and returns try() call and inner call (the argument of the try call)
-// since try()'s argument must be function call. When it is not a try() call, it returns nil as first the
-// return value. When it is an invalid try() call, it sets the error to err field and returns false
-// as the third return value.
-func (tce *tryCallElimination) checkTryCall(maybeCall ast.Expr) (tryCall *ast.CallExpr, innerCall *ast.CallExpr, ok bool) {
-	outer, ok := maybeCall.(*ast.CallExpr)
-	if !ok {
-		log("Skipped since expression is not a call expression")
-		return nil, nil, true
+// Check given call expression is valid try() call and returns inner function call.
+// The first return value is an inner call of try() call. The second return value is whether it's
+// well-formed try() call or not.
+// When inner it's not valid try() call, it returns false as the second return value.
+// When the given call expression is actually not try() but it's still valid, it returns nil as
+// the first return value though the second return value is true.
+func (tce *tryCallElimination) checkTryCall(tryCall *ast.CallExpr) (*ast.CallExpr, bool) {
+	name, ok := tryCall.Fun.(*ast.Ident)
+	if !ok || name.Name != "try" {
+		log("Skipped since callee is not 'try' function")
+		return nil, true
 	}
 
-	name, ok := outer.Fun.(*ast.Ident)
-	if !ok {
-		log("Skipped since callee was not var ref")
-		return nil, nil, true
-	}
-	if name.Name != "try" {
-		log("Skipped since RHS is not calling 'try':", name.Name)
-		return nil, nil, true
+	if len(tryCall.Args) != 1 {
+		tce.errfAt(tryCall, "try() should take 1 argument but %d arguments passed", len(tryCall.Args))
+		return nil, false
 	}
 
-	if len(outer.Args) != 1 {
-		tce.errfAt(outer, "try() should take 1 argument but %d arguments passed", len(outer.Args))
-		return nil, nil, false
-	}
-
-	inner, ok := outer.Args[0].(*ast.CallExpr)
+	inner, ok := tryCall.Args[0].(*ast.CallExpr)
 	if !ok {
-		tce.errfAt(outer, "try() call's argument must be function call but found %s", reflect.TypeOf(outer.Args[0]))
-		return nil, nil, false
+		tce.errfAt(tryCall, "try() call's argument must be function call but found %s", reflect.TypeOf(tryCall.Args[0]))
+		return nil, false
 	}
 
 	if len(tce.funcs) == 0 {
-		tce.errAt(outer, "try() function is used outside function")
-		return nil, nil, false
+		tce.errAt(tryCall, "try() function is used outside function")
+		return nil, false
 	}
 
 	var funcTy *ast.FuncType
@@ -136,23 +157,42 @@ func (tce *tryCallElimination) checkTryCall(maybeCall ast.Expr) (tryCall *ast.Ca
 	}
 
 	if funcTy.Results == nil || len(funcTy.Results.List) == 0 {
-		tce.errAt(outer, "The function returns nothing. try() is not available")
-		return nil, nil, false
+		tce.errAt(tryCall, "The function returns nothing. try() is not available")
+		return nil, false
 	}
 	rets := funcTy.Results.List
 
 	ty := rets[len(rets)-1].Type
 	if ident, ok := ty.(*ast.Ident); !ok || ident.Name != "error" {
-		tce.errfAt(outer, "The function does not return error as last return value. Last return type is %q", ty)
-		return nil, nil, false
+		tce.errfAt(tryCall, "The function does not return error as last return value. Last return type is %q", ty)
+		return nil, false
 	}
 
-	log(hi("try() found:"), inner.Fun)
+	log(hi("try() found"), "at", tce.logPos(tryCall), ':', inner.Fun)
+	return inner, true
+}
+
+// checkMaybeTryCall checks given try() call and returns try() call and inner call (the argument of the try call)
+// since try()'s argument must be function call. When it is not a try() call, it returns nil as first the
+// return value. When it is an invalid try() call, it sets the error to err field and returns false
+// as the third return value.
+func (tce *tryCallElimination) checkMaybeTryCall(maybeCall ast.Expr) (tryCall *ast.CallExpr, innerCall *ast.CallExpr, ok bool) {
+	outer, ok := maybeCall.(*ast.CallExpr)
+	if !ok {
+		log("Skipped since expression is not a call expression")
+		return nil, nil, true
+	}
+
+	inner, ok := tce.checkTryCall(outer)
+	if !ok || inner == nil {
+		return nil, nil, ok
+	}
+
 	return outer, inner, true
 }
 
 func (tce *tryCallElimination) eliminateTryCall(kind transKind, node ast.Node, maybeTryCall ast.Expr) bool {
-	tryCall, innerCall, ok := tce.checkTryCall(maybeTryCall)
+	tryCall, innerCall, ok := tce.checkMaybeTryCall(maybeTryCall)
 	if !ok || tryCall == nil {
 		log("Skipped since the function call is not try() call or invalid try() call")
 		return false
@@ -273,8 +313,8 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 	}
 }
 
-// Returns parent's current index
-func (tce *tryCallElimination) pushBlock(node ast.Stmt) int {
+// Returns parent's current index and var ID
+func (tce *tryCallElimination) pushBlock(node ast.Stmt) (int, *tempIDGen) {
 	parent := tce.currentBlk
 	tree := &blockTree{ast: node, parent: parent}
 	if tree.isRoot() {
@@ -284,13 +324,19 @@ func (tce *tryCallElimination) pushBlock(node ast.Stmt) int {
 		parent.children = append(parent.children, tree)
 	}
 
+	prevIdx, prevTempID := tce.blkIndex, tce.tempID
+
 	tce.parentBlk = parent
 	tce.currentBlk = tree
-	return tce.blkIndex
+	tce.blkIndex = 0
+	tce.tempID = newTempIDGen()
+
+	return prevIdx, prevTempID
 }
 
-func (tce *tryCallElimination) popBlock(prevIdx int) {
+func (tce *tryCallElimination) popBlock(prevIdx int, prevTempID *tempIDGen) {
 	tce.blkIndex = prevIdx
+	tce.tempID = prevTempID
 	tce.currentBlk = tce.parentBlk
 	if tce.parentBlk != nil {
 		tce.parentBlk = tce.parentBlk.parent
@@ -298,12 +344,10 @@ func (tce *tryCallElimination) popBlock(prevIdx int) {
 }
 
 func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
-	for i, stmt := range stmts {
+	for _, stmt := range stmts {
 		if tce.err != nil {
 			return
 		}
-
-		tce.blkIndex = i
 
 		if e, ok := stmt.(*ast.ExprStmt); ok {
 			tce.visitToplevelExpr(e)
@@ -311,6 +355,10 @@ func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
 			// Recursively visit
 			ast.Walk(tce, stmt)
 		}
+
+		// Note: Index of stmts is not available because inserting/removing statement requires to
+		// adjust the current index.
+		tce.blkIndex++
 	}
 }
 
@@ -320,21 +368,57 @@ func (tce *tryCallElimination) visitBlockNode(node ast.Stmt, list []ast.Stmt) {
 	log(hi("Block in ", ty, " start"), "at", pos)
 
 	tce.parents = tce.parents.push(node)
-	prevIdx := tce.pushBlock(node)
+	prevIdx, prevTempID := tce.pushBlock(node)
 	tce.visitStmts(list)
-	tce.popBlock(prevIdx)
+	tce.popBlock(prevIdx, prevTempID)
 	tce.parents = tce.parents.pop()
 
 	log(hi("Block in ", ty, " end"), "at", pos)
 }
 
+// insertStmt inserts given statement *before* current index of current block
+func (tce *tryCallElimination) insertStmt(stmt ast.Stmt) {
+	tce.currentBlk.insertStmtAt(tce.blkIndex, stmt)
+	// New statement was inserted. Adjust current index
+	tce.blkIndex++
+}
+
+// makeIndirectExpr create an indirect expression with inserting an assignment statement.
+// Before:
+//   expr
+// After:
+//   $n := expr
+//   $n
+// When the expression is target try() call,
+// func (tce *tryCallElimination) makeIndirectExpr(expr ast.Expr, tryCall *ast.CallExpr) (ast.Expr, bool) {
+//
+// }
+
+func (tce *tryCallElimination) visitTryCallExpr(call *ast.CallExpr) ast.Visitor {
+	innerCall, ok := tce.checkTryCall(call)
+	if !ok {
+		// Invalid try() call
+		return nil
+	}
+	if innerCall == nil {
+		// Not a try() call
+		return tce
+	}
+
+	// var e ast.Expr
+	// switch parent := tce.parents.top().(type) {
+
+	// }
+
+	// TODO: Implement translation for generic try() call expression
+	tce.errAt(call, "try() call was not translated. Only try() calls at toplevel call expression, assignments (= or :=), value spec (var or const) are translated")
+	return nil
+}
+
 func (tce *tryCallElimination) visitPre(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.CallExpr:
-		if ident, ok := node.Fun.(*ast.Ident); ok && ident.Name == "try" {
-			tce.errAt(ident, "try() call was not translated. Only try() calls at toplevel call expression, assignments (= or :=), value spec (var or const) are translated")
-			return nil
-		}
+		return tce.visitTryCallExpr(node)
 	case *ast.BlockStmt:
 		tce.visitBlockNode(node, node.List)
 		return nil // visitBlockNode() recursively calls ast.Walk() in itself

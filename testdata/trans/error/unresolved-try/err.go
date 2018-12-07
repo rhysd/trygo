@@ -2,6 +2,6 @@ package foo
 
 import "fmt"
 
-func f() {
+func f() error {
 	1 + try(fmt.Println("hello"))
 }

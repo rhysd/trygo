@@ -78,9 +78,8 @@ func (nci *nilCheckInsertion) funcTypeOf(node ast.Node) (*types.Signature, *ast.
 	return ty, lit.Type
 }
 
-// insertStmts inserts given statements *before* given index position of current block. If previous
-// translation exists in the same block and some statements were already inserted, the offset is
-// automatically adjusted.
+// If previous translation exists in the same block and some statements were already inserted,
+// the offset is automatically adjusted.
 func (nci *nilCheckInsertion) insertStmtAt(idx int, stmt ast.Stmt) {
 	logf("Insert statement at index %d with offset %d", idx, nci.offset)
 	nci.blk.insertStmtAt(idx+nci.offset, stmt)

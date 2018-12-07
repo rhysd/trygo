@@ -88,6 +88,7 @@ func (tree *blockTree) setStmts(stmts []ast.Stmt) {
 	}
 }
 
+// insertStmtAt inserts given statement *before* given index position of current block
 func (tree *blockTree) insertStmtAt(idx int, stmt ast.Stmt) {
 	logf("Insert %T statement at index %d of block %T", stmt, idx, tree.ast)
 	prev := tree.stmts()
