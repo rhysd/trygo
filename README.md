@@ -120,6 +120,22 @@ if err != nil {
 }
 ```
 
+Assignment operation `x op= y` (e.g. `x += y`) is supported.
+
+```
+$Assignee op= try($CallExpr)
+```
+
+Expanded to:
+
+```
+$tmp, err := $CallExpr
+if err != nil {
+    return $zerovals, err
+}
+$Assignee op= $tmp
+```
+
 ### Call statement
 
 ```

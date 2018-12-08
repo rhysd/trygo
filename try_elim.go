@@ -57,6 +57,7 @@ type tryCallElimination struct {
 	parentBlk  *blockTree
 	currentBlk *blockTree
 	blkIndex   int
+	varID      uint
 	parents    nodeStack
 	funcs      nodeStack
 	numTrans   int
@@ -88,6 +89,19 @@ func (tce *tryCallElimination) errAt(node ast.Node, msg string) {
 
 func (tce *tryCallElimination) errfAt(node ast.Node, format string, args ...interface{}) {
 	tce.errAt(node, fmt.Sprintf(format, args...))
+}
+
+// insertStmt inserts given statement *before* current index of current block
+func (tce *tryCallElimination) insertStmt(stmt ast.Stmt) {
+	tce.currentBlk.insertStmtAt(tce.blkIndex, stmt)
+	// New statement was inserted. Adjust current index
+	tce.blkIndex++
+}
+
+func (tce *tryCallElimination) newTempIdent() *ast.Ident {
+	i := ast.NewIdent(fmt.Sprintf("_%d", tce.varID))
+	tce.varID++
+	return i
 }
 
 // checkTryCall checks given try() call and returns try() call and inner call (the argument of the try call)
@@ -231,12 +245,44 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 		return
 	}
 
-	if ok := tce.eliminateTryCall(transKindAssign, assign, assign.Rhs[0]); !ok {
+	if assign.Tok != token.DEFINE && assign.Tok != token.ASSIGN {
+		// Separate compound assignments to 2 steps. At first calculate and check an error of RHS, then apply compound substitution
+		//  From:
+		//    $retval += try(f(...))
+		//  To:
+		//    $tmp, err := try(f(...))
+		//    $retval += $tmp
+		// The inserted assignment statement (:=) is a new translation point to insert if err != nil
+		// check instead of current += assignment.
+		rhs := assign.Rhs[0]
+		tmp := tce.newTempIdent()
+		assign.Rhs[0] = tmp
+
+		// Note: '_' is inserted by visiting this assignment statement recursively. Here one
+		// element is set to LHS.
+		def := &ast.AssignStmt{
+			Lhs:    []ast.Expr{tmp},
+			Tok:    token.DEFINE,
+			TokPos: assign.TokPos,
+			Rhs:    []ast.Expr{rhs},
+		}
+
+		// Insert := statement
+		tce.insertStmt(def)
+
+		// Inserted := statement is a new translation point. Eliminate try() from it instead of
+		// current += assign statement.
+		// := statement was inserted before current index. -- is for adjusting the index to correctly
+		// insert if err != nil check. After visit the inserted := statement, get the current
+		// index back to original by ++.
+		tce.blkIndex--
+		tce.visitAssign(def)
+		tce.blkIndex++
+
 		return
 	}
 
-	if assign.Tok != token.DEFINE && assign.Tok != token.ASSIGN {
-		tce.errfAt(assign, "try() can only be used with = and :=, but found %s. Note that compound assignments such as += are not supported", assign.Tok)
+	if ok := tce.eliminateTryCall(transKindAssign, assign, assign.Rhs[0]); !ok {
 		return
 	}
 
@@ -274,7 +320,7 @@ func (tce *tryCallElimination) visitToplevelExpr(stmt *ast.ExprStmt) {
 }
 
 // Returns parent's current index
-func (tce *tryCallElimination) pushBlock(node ast.Stmt) int {
+func (tce *tryCallElimination) pushBlock(node ast.Stmt) (int, uint) {
 	parent := tce.currentBlk
 	tree := &blockTree{ast: node, parent: parent}
 	if tree.isRoot() {
@@ -284,13 +330,19 @@ func (tce *tryCallElimination) pushBlock(node ast.Stmt) int {
 		parent.children = append(parent.children, tree)
 	}
 
+	prevIdx := tce.blkIndex
+	prevVarID := tce.varID
+
 	tce.parentBlk = parent
 	tce.currentBlk = tree
-	return tce.blkIndex
+	tce.blkIndex = 0
+	tce.varID = 0
+	return prevIdx, prevVarID
 }
 
-func (tce *tryCallElimination) popBlock(prevIdx int) {
+func (tce *tryCallElimination) popBlock(prevIdx int, prevVarID uint) {
 	tce.blkIndex = prevIdx
+	tce.varID = prevVarID
 	tce.currentBlk = tce.parentBlk
 	if tce.parentBlk != nil {
 		tce.parentBlk = tce.parentBlk.parent
@@ -298,12 +350,10 @@ func (tce *tryCallElimination) popBlock(prevIdx int) {
 }
 
 func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
-	for i, stmt := range stmts {
+	for _, stmt := range stmts {
 		if tce.err != nil {
 			return
 		}
-
-		tce.blkIndex = i
 
 		if e, ok := stmt.(*ast.ExprStmt); ok {
 			tce.visitToplevelExpr(e)
@@ -311,6 +361,7 @@ func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
 			// Recursively visit
 			ast.Walk(tce, stmt)
 		}
+		tce.blkIndex++
 	}
 }
 
@@ -320,9 +371,9 @@ func (tce *tryCallElimination) visitBlockNode(node ast.Stmt, list []ast.Stmt) {
 	log(hi("Block in ", ty, " start"), "at", pos)
 
 	tce.parents = tce.parents.push(node)
-	prevIdx := tce.pushBlock(node)
+	prevIdx, prevVarID := tce.pushBlock(node)
 	tce.visitStmts(list)
-	tce.popBlock(prevIdx)
+	tce.popBlock(prevIdx, prevVarID)
 	tce.parents = tce.parents.pop()
 
 	log(hi("Block in ", ty, " end"), "at", pos)
