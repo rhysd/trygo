@@ -158,3 +158,25 @@ func TestGenerateNewGenError(t *testing.T) {
 		t.Fatal("Unexpected error:", err)
 	}
 }
+
+func TestGenPackageDirsOutdirIsInInpath(t *testing.T) {
+	inpath := filepath.Join(cwd, "testdata", "gen", "pkgdirs", "outpath-is-in-inpath")
+	outdir := filepath.Join(inpath, "out") // Out path is subdirectory of input path
+
+	gen, err := trygo.NewGen(outdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, err := gen.PackageDirs([]string{inpath})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(dirs) != 1 {
+		t.Fatal(dirs)
+	}
+	if dirs[0] == outdir {
+		t.Fatal("output directory must not be translated")
+	}
+}

@@ -54,6 +54,10 @@ func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
 			if !strings.HasSuffix(p, ".go") {
 				return nil
 			}
+			if strings.HasPrefix(p, gen.OutDir) {
+				// When the Go file is in output directory, it is ignored
+				return nil
+			}
 			saw[filepath.Dir(p)] = struct{}{}
 			return nil
 		}); err != nil {
@@ -84,6 +88,10 @@ func (gen *Gen) PackageDirs(paths []string) ([]string, error) {
 	return gen.packageDirsFromPaths(paths)
 }
 
+// outDirPath calculates output directory where a translated package should be generated for given path.
+// It consists the same directory structure as given path in output directory. For example, when input
+// path is /path/to/src/foo and output path is /path/to/out, the output directory for the input path
+// will be /path/to/out/src/foo.
 func (gen *Gen) outDirPath(inpath string) string {
 	// outDir: /repo/out
 	// package: /repo/foo/bar
