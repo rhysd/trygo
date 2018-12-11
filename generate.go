@@ -101,10 +101,7 @@ func (gen *Gen) outDirPath(inpath string) string {
 	return filepath.Join(gen.OutDir, part)
 }
 
-// TranslatePackages translates all packages specified with directory paths. It returns slice of Package
-// which represent translated packages. When parsing Go(TryGo) sources failed or the translations failed,
-// this function returns an error.
-func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
+func (gen *Gen) parsePkgDirs(pkgDirs []string) ([]*Package, error) {
 	log("Parse package directories:", pkgDirs)
 
 	parsed := make([]*Package, 0, len(pkgDirs))
@@ -117,6 +114,18 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 		for _, pkg := range pkgs {
 			parsed = append(parsed, NewPackage(pkg, dir, gen.outDirPath(dir), fset))
 		}
+	}
+
+	return parsed, nil
+}
+
+// TranslatePackages translates all packages specified with directory paths. It returns slice of Package
+// which represent translated packages. When parsing Go(TryGo) sources failed or the translations failed,
+// this function returns an error.
+func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
+	parsed, err := gen.parsePkgDirs(pkgDirs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Translate all parsed ASTs per package
@@ -186,6 +195,47 @@ func (gen *Gen) Generate(paths []string, verify bool) error {
 	log("Created outdir:", hi(gen.OutDir))
 
 	return gen.GeneratePackages(dirs, verify)
+}
+
+func (gen *Gen) UntranslatePackages(goPkgDirs []string) ([]*Package, error) {
+	parsed, err := gen.parsePkgDirs(goPkgDirs)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := Untranslate(parsed); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (gen *Gen) Untranslate(paths []string) error {
+	log("Start untranslation for", paths)
+
+	dirs, err := gen.PackageDirs(paths)
+	if err != nil {
+		return err
+	}
+	log("Package directories:", hi(dirs))
+
+	if err := os.MkdirAll(gen.OutDir, 0755); err != nil {
+		return errors.Wrapf(err, "Cannot create output directory %q", gen.OutDir)
+	}
+
+	pkgs, err := gen.UntranslatePackages(dirs)
+	if err != nil {
+		return err
+	}
+
+	for _, pkg := range pkgs {
+		if err := pkg.Write(); err != nil {
+			return err
+		}
+		fmt.Fprintln(gen.Writer, pkg.Path)
+	}
+
+	return nil
 }
 
 // NewGen creates a new Gen instance with given output directory. All translated packages are generated

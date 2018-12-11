@@ -16,7 +16,7 @@ func CreateFileInSubdir(subdir, filename string, content []byte) error {
         return err
     }
 
-    if err := os.Mkdir(filepath.Join(cwd, subdir)); err != nil {
+    if err := os.Mkdir(filepath.Join(cwd, subdir), 0755); err != nil {
         return err
     }
 
@@ -42,7 +42,7 @@ TryGo:
 func CreateFileInSubdir(subdir, filename string, content []byte) error {
     cwd := try(os.Getwd())
 
-    try(os.Mkdir(filepath.Join(cwd, subdir)))
+    try(os.Mkdir(filepath.Join(cwd, subdir), 0755))
 
     p := filepath.Join(cwd, subdir, filename)
     f := try(os.Create(p))
