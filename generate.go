@@ -54,7 +54,7 @@ func (gen *Gen) packageDirsFromPaths(paths []string) ([]string, error) {
 			if !strings.HasSuffix(p, ".go") {
 				return nil
 			}
-			if strings.HasPrefix(p, gen.OutDir) {
+			if gen.OutDir != "" && strings.HasPrefix(p, gen.OutDir) {
 				// When the Go file is in output directory, it is ignored
 				return nil
 			}
@@ -109,12 +109,9 @@ func (gen *Gen) outDirPath(inpath string) string {
 	return filepath.Join(gen.OutDir, part)
 }
 
-// TranslatePackages translates all packages specified with directory paths. It returns slice of Package
-// which represent translated packages. When parsing Go(TryGo) sources failed or the translations failed,
-// this function returns an error.
-func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
-	log("Parse package directories:", pkgDirs)
-
+// ParsePackages parses given package directories and returns parsed packages.
+// Output directory where translated package is put is calculated based on output directory.
+func (gen *Gen) ParsePackages(pkgDirs []string) ([]*Package, error) {
 	parsed := make([]*Package, 0, len(pkgDirs))
 	fset := token.NewFileSet()
 	for _, dir := range pkgDirs {
@@ -125,6 +122,19 @@ func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
 		for _, pkg := range pkgs {
 			parsed = append(parsed, NewPackage(pkg, dir, gen.outDirPath(dir), fset))
 		}
+	}
+	return parsed, nil
+}
+
+// TranslatePackages translates all packages specified with directory paths. It returns slice of Package
+// which represent translated packages. When parsing Go(TryGo) sources failed or the translations failed,
+// this function returns an error.
+func (gen *Gen) TranslatePackages(pkgDirs []string) ([]*Package, error) {
+	log("Parse package directories:", pkgDirs)
+
+	parsed, err := gen.ParsePackages(pkgDirs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Translate all parsed ASTs per package
@@ -194,6 +204,24 @@ func (gen *Gen) Generate(paths []string, verify bool) error {
 	log("Created outdir:", hi(gen.OutDir))
 
 	return gen.GeneratePackages(dirs, verify)
+}
+
+// Check checks packages in given paths. Nothing is generated. When check was OK, it returns nil.
+func (gen *Gen) Check(paths []string) error {
+	log("Start check for", paths)
+
+	dirs, err := gen.PackageDirs(paths)
+	if err != nil {
+		return err
+	}
+	log("Package directories:", hi(dirs))
+
+	pkgs, err := gen.ParsePackages(dirs)
+	if err != nil {
+		return err
+	}
+
+	return Check(pkgs)
 }
 
 // NewGen creates a new Gen instance with given output directory. All translated packages are generated

@@ -18,6 +18,7 @@ Flags:`
 var (
 	outDir = flag.String("o", "", "Output directory path")
 	debug  = flag.Bool("debug", false, "Output debug log")
+	check  = flag.Bool("check", false, "Check only")
 )
 
 func exit(err error) {
@@ -38,6 +39,12 @@ func main() {
 	flag.Parse()
 
 	trygo.InitLog(*debug)
+
+	if *check {
+		// Do not use trygo.NewGen() since output directory check is not necessary
+		gen := &trygo.Gen{Writer: os.Stdout}
+		exit(gen.Check(flag.Args()))
+	}
 
 	gen, err := trygo.NewGen(*outDir)
 	if err != nil {

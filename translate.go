@@ -292,3 +292,27 @@ func Translate(pkgs []*Package) error {
 	}
 	return nil
 }
+
+// Check checks given packages. It eliminates all try() calls then runs type check against
+// packages. Returning nil means check was OK.
+func Check(pkgs []*Package) error {
+	log("Check parsed packages:", pkgs)
+	for _, pkg := range pkgs {
+		log("Checking packages at", pkg.Birth)
+		tce := &tryCallElimination{
+			pkg:     pkg.Node,
+			fileset: pkg.Files,
+		}
+		ast.Walk(tce, pkg.Node)
+		if tce.err != nil {
+			return tce.err
+		}
+		tce.assertPostCondition()
+		if err := pkg.Verify(); err != nil {
+			return err
+		}
+		log("Check OK:", pkg.Birth)
+	}
+	log("All check OK")
+	return nil
+}
