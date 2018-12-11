@@ -17,6 +17,7 @@ Flags:`
 
 var (
 	outDir = flag.String("o", "", "Output directory path")
+	check  = flag.Bool("c", false, "Check only")
 	debug  = flag.Bool("debug", false, "Output debug log")
 	check  = flag.Bool("check", false, "Check only")
 )
