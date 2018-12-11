@@ -2,3 +2,4 @@
 /testdata/**/HAVE/
 /cover.out
 /out
+/testdata/example/out
