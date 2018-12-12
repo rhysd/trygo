@@ -235,16 +235,6 @@ func (tce *tryCallElimination) visitAssign(assign *ast.AssignStmt) {
 		return
 	}
 
-	switch tce.parents.top().(type) {
-	case *ast.BlockStmt, *ast.CommClause, *ast.CaseClause:
-		// ok, go ahead
-	default:
-		// This assignment is not at toplevel, for example, `if x := e; ...` or `for x := range e`...
-		// Only toplevel assignments (= or :=) should be translated to avoid wrong if err != nil check insertion
-		log("Skipped non-toplevel assignment at", pos)
-		return
-	}
-
 	if assign.Tok != token.DEFINE && assign.Tok != token.ASSIGN {
 		// Separate compound assignments to 2 steps. At first calculate and check an error of RHS, then apply compound substitution
 		//  From:
@@ -349,19 +339,50 @@ func (tce *tryCallElimination) popBlock(prevIdx int, prevVarID uint) {
 	}
 }
 
-func (tce *tryCallElimination) visitStmts(stmts []ast.Stmt) {
-	for _, stmt := range stmts {
+func (tce *tryCallElimination) visitBranchClauses(clauses *ast.BlockStmt) {
+	for _, clause := range clauses.List {
 		if tce.err != nil {
 			return
 		}
-
-		if e, ok := stmt.(*ast.ExprStmt); ok {
-			tce.visitToplevelExpr(e)
-		} else {
-			// Recursively visit
-			ast.Walk(tce, stmt)
+		switch clause := clause.(type) {
+		case *ast.CaseClause:
+			tce.visitBlockNode(clause, clause.Body)
+		case *ast.CommClause:
+			tce.visitBlockNode(clause, clause.Body)
 		}
-		tce.blkIndex++
+	}
+}
+
+func (tce *tryCallElimination) visitStmt(stmt ast.Stmt) {
+	switch stmt := stmt.(type) {
+	case *ast.ExprStmt:
+		tce.visitToplevelExpr(stmt)
+	case *ast.AssignStmt:
+		// := or =
+		tce.visitAssign(stmt)
+	case *ast.DeclStmt:
+		// var ... = or const ... =
+		if decl, ok := stmt.Decl.(*ast.GenDecl); ok {
+			for _, spec := range decl.Specs {
+				if v, ok := spec.(*ast.ValueSpec); ok {
+					tce.visitSpec(v)
+				}
+			}
+		}
+	case *ast.SwitchStmt:
+		ast.Walk(tce, stmt.Init)
+		ast.Walk(tce, stmt.Tag)
+		tce.visitBranchClauses(stmt.Body)
+	case *ast.TypeSwitchStmt:
+		ast.Walk(tce, stmt.Init)
+		ast.Walk(tce, stmt.Assign)
+		tce.visitBranchClauses(stmt.Body)
+	case *ast.SelectStmt:
+		tce.visitBranchClauses(stmt.Body)
+	// TODO: Add support for 'if' and 'for' statment which may have nested init statment
+	default:
+		// Recursively visit
+		ast.Walk(tce, stmt)
 	}
 }
 
@@ -372,7 +393,15 @@ func (tce *tryCallElimination) visitBlockNode(node ast.Stmt, list []ast.Stmt) {
 
 	tce.parents = tce.parents.push(node)
 	prevIdx, prevVarID := tce.pushBlock(node)
-	tce.visitStmts(list)
+
+	for _, stmt := range list {
+		if tce.err != nil {
+			return
+		}
+		tce.visitStmt(stmt)
+		tce.blkIndex++
+	}
+
 	tce.popBlock(prevIdx, prevVarID)
 	tce.parents = tce.parents.pop()
 
@@ -389,18 +418,6 @@ func (tce *tryCallElimination) visitPre(node ast.Node) ast.Visitor {
 	case *ast.BlockStmt:
 		tce.visitBlockNode(node, node.List)
 		return nil // visitBlockNode() recursively calls ast.Walk() in itself
-	case *ast.CaseClause:
-		tce.visitBlockNode(node, node.Body)
-		return nil // visitBlockNode() recursively calls ast.Walk() in itself
-	case *ast.CommClause:
-		tce.visitBlockNode(node, node.Body)
-		return nil // visitBlockNode() recursively calls ast.Walk() in itself
-	case *ast.ValueSpec:
-		// var or const
-		tce.visitSpec(node)
-	case *ast.AssignStmt:
-		// := or =
-		tce.visitAssign(node)
 	case *ast.FuncDecl:
 		tce.funcs = tce.funcs.push(node)
 		log(hi("Start function:"), node.Name.Name)
